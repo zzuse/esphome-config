@@ -83,4 +83,4 @@ esphome run sim.yaml           # run the SDL simulator locally
   component library usage
 - [esphome-modular-lvgl-buttons/ARCHITECTURE.md](esphome-modular-lvgl-buttons/ARCHITECTURE.md) —
   design rationale for the component library
-- `INSTALL.md` — planned: full from-scratch hardware + flashing setup guide
+- [INSTALL.md](INSTALL.md) — from-scratch tool setup, hardware include, and first flash
