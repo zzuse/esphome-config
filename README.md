@@ -67,7 +67,7 @@ git add esphome-modular-lvgl-buttons
 git commit -m "Update esphome-modular-lvgl-buttons submodule"
 ```
 
-## Build / flash
+## Build / flash / config / logs
 
 Requires [ESPHome](https://esphome.io/) 2026.7.0+ and, for SVG image support, `cairosvg`
 (`pip install cairosvg`).
@@ -75,6 +75,8 @@ Requires [ESPHome](https://esphome.io/) 2026.7.0+ and, for SVG image support, `c
 ```bash
 esphome run my-panel.yaml      # flash the real device
 esphome run sim.yaml           # run the SDL simulator locally
+esphome config sim.yaml > /tmp/sim.txt  # test config
+esphome logs my-panel.yaml     # see logs
 ```
 
 ## Further docs
