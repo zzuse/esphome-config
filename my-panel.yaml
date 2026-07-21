@@ -89,3 +89,32 @@ lvgl:
                   align: center
                   text_color: white
                   text: "Cell 5,9"
+
+micro_wake_word:
+  id: mww
+  models:
+    - model: hey_jarvis     # or hey_jarvis, hey_mycroft
+  microphone: my_microphone     # ← match the id from the hardware file
+  on_wake_word_detected:
+    - voice_assistant.start:
+
+voice_assistant:
+  id: va
+  microphone: my_microphone     # ← same id
+  speaker: my_speaker    # ← match the speaker/media_player id
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_end:
+    - wait_until:
+        not:
+          voice_assistant.is_running:
+    - micro_wake_word.start:
+  on_error:
+    - micro_wake_word.start:
+
+api:
+  on_client_connected:
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - voice_assistant.stop:

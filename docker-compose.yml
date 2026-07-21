@@ -1,0 +1,19 @@
+# docker-compose.yml
+services:
+  whisper:
+    image: rhasspy/wyoming-whisper
+    command: --model base-int8 --language en
+    ports:
+      - "10300:10300"
+    volumes:
+      - ./whisper-data:/data
+    restart: unless-stopped
+
+  piper:
+    image: rhasspy/wyoming-piper
+    command: --voice en_US-lessac-medium
+    ports:
+      - "10200:10200"
+    volumes:
+      - ./piper-data:/data
+    restart: unless-stopped
