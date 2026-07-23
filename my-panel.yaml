@@ -89,6 +89,89 @@ lvgl:
                   align: center
                   text_color: white
                   text: "Cell 5,9"
+        # Speaker volume bar (vertical), icon at the bottom
+        - container:
+            id: volume_tile
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 0
+            grid_cell_row_span: 2
+            grid_cell_column_span: 1
+            widgets:
+              - slider:
+                  id: volume_slider
+                  align: top_mid
+                  y: 10
+                  width: 20
+                  height: 72%
+                  min_value: 0
+                  max_value: 100
+                  value: 50
+                  radius: 10
+                  knob:
+                    bg_color: $label_on_color
+                  indicator:
+                    radius: 10
+                    bg_color: $button_on_color
+                  on_release:
+                    - media_player.volume_set:
+                        id: panel_media
+                        volume: !lambda return x / 100.0f;
+              - label:
+                  id: volume_icon
+                  text_font: $icon_font
+                  align: bottom_mid
+                  y: -5
+                  text_color: $icon_on_color
+                  text: $mdi_volume_high
+        # Display backlight brightness bar (vertical), icon at the bottom
+        - container:
+            id: brightness_tile
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            grid_cell_row_pos: 4
+            grid_cell_column_pos: 1
+            grid_cell_row_span: 2
+            grid_cell_column_span: 1
+            widgets:
+              - slider:
+                  id: brightness_slider
+                  align: top_mid
+                  y: 10
+                  width: 20
+                  height: 72%
+                  min_value: 5    # floor so the screen can't be slid fully dark
+                  max_value: 100
+                  value: 100
+                  radius: 10
+                  knob:
+                    bg_color: $label_on_color
+                  indicator:
+                    radius: 10
+                    bg_color: $button_on_color
+                  on_release:
+                    - light.turn_on:
+                        id: display_backlight
+                        brightness: !lambda return x / 100.0f;
+              - label:
+                  id: brightness_icon
+                  text_font: $icon_font
+                  align: bottom_mid
+                  y: -5
+                  text_color: $icon_on_color
+                  text: $mdi_brightness_6
+
+# Keep the on-screen brightness slider in sync with the backlight
+# (also covers changes made from HA and the day/night backlight scripts)
+light:
+  - id: !extend display_backlight
+    on_state:
+      - lvgl.slider.update:
+          id: brightness_slider
+          value: !lambda |-
+            auto vals = id(display_backlight).remote_values;
+            return vals.is_on() ? vals.get_brightness() * 100.0f : 0.0f;
 
 micro_wake_word:
   id: mww
@@ -98,17 +181,70 @@ micro_wake_word:
   on_wake_word_detected:
     - voice_assistant.start:
 
+media_player:
+  - platform: speaker
+    id: panel_media
+    name: Panel Speaker
+    # ES8311 DAC: below ~50% is inaudible, above ~95% clips.
+    # Map the 0-100% volume scale into the clean range.
+    volume_min: 0.5
+    volume_max: 0.9
+    # Feed the resampler → mixer → my_speaker chain from the hardware file.
+    # Writing to my_speaker directly conflicts with the mixer and garbles audio.
+    announcement_pipeline:
+      speaker: announcement_resampling_speaker
+      format: FLAC
+      sample_rate: 48000
+      num_channels: 1
+    media_pipeline:
+      speaker: media_resampling_speaker
+      format: FLAC
+      sample_rate: 48000
+      num_channels: 1
+    on_state:
+      # Keep the on-screen volume slider in sync (also covers changes made from HA)
+      - lvgl.slider.update:
+          id: volume_slider
+          value: !lambda return id(panel_media).volume * 100.0f;
+    on_announcement:
+      # Mic and speaker share one I2S bus at different sample rates —
+      # the mic must be released before the speaker starts.
+      - if:
+          condition:
+            - microphone.is_capturing:
+          then:
+            - micro_wake_word.stop:
+            - voice_assistant.stop:
+            - wait_until:
+                condition:
+                  not:
+                    microphone.is_capturing:
+                timeout: 2s
+
 voice_assistant:
   id: va
   microphone: my_microphone     # ← same id
-  speaker: my_speaker    # ← match the speaker/media_player id
+  media_player: panel_media
+  micro_wake_word: mww
   noise_suppression_level: 2
   auto_gain: 31dBFS
   volume_multiplier: 2.0
   on_end:
+    # Give the TTS announcement time to be queued and start playing
+    - delay: 1s
+    # Don't restart the mic (shared I2S bus) until playback has finished
     - wait_until:
-        not:
-          voice_assistant.is_running:
+        condition:
+          and:
+            - not:
+                media_player.is_announcing:
+                  id: panel_media
+            - not:
+                media_player.is_playing:
+                  id: panel_media
+        timeout: 30s
+    # Brief pause to let the speaker fully release the I2S bus
+    - delay: 300ms
     - micro_wake_word.start:
   on_error:
     - micro_wake_word.start:
@@ -118,3 +254,4 @@ api:
     - micro_wake_word.start:
   on_client_disconnected:
     - voice_assistant.stop:
+    - micro_wake_word.stop:

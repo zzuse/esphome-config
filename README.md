@@ -14,6 +14,7 @@ library, pulled in here as a git submodule.
 | `secrets.yaml` | Local secrets (wifi, coordinates) — gitignored, not in the repo |
 | `secrets.yaml.example` | Template for `secrets.yaml` |
 | `esphome-modular-lvgl-buttons/` | Submodule: the UI component library (own repo/history) |
+| `docker-compose.yml` | start speech to text service `docker compose up -d` |
 
 ## Clone
 

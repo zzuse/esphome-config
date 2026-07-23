@@ -124,5 +124,6 @@ font:
       $mdi_lightbulb,  # mdi-lightbulb - generic bulb icon
       $mdi_string_lights,  # mdi-string-lights - decorative string lights
       $mdi_track_light,  # mdi-track-light - track lighting
+      $mdi_volume_high,  # mdi-volume-high - speaker volume slider icon
       $mdi_white_balance_sunny,  # mdi-white-balance-sunny - color temp/sun icon
     ]
