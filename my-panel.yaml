@@ -125,6 +125,31 @@ lvgl:
                   y: -5
                   text_color: $icon_on_color
                   text: $mdi_volume_high
+        # Battery indicator, top-right status corner
+        - container:
+            id: battery_tile
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 9
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  id: battery_icon
+                  text_font: $icon_font
+                  align: center
+                  y: -12
+                  text_color: $icon_off_color
+                  text: $mdi_battery_outline
+              - label:
+                  id: battery_label
+                  text_font: $text_font
+                  align: center
+                  y: 22
+                  text_color: $label_off_color
+                  text: "--"
+
         # Display backlight brightness bar (vertical), icon at the bottom
         - container:
             id: brightness_tile
@@ -172,6 +197,107 @@ light:
           value: !lambda |-
             auto vals = id(display_backlight).remote_values;
             return vals.is_on() ? vals.get_brightness() * 100.0f : 0.0f;
+
+# Battery monitoring.
+# The board's BAT header (J13) feeds a 200K/100K divider into GPIO20 — see the
+# ESP32-P4-WIFI6-Touch-LCD-X schematic, "POWER" sheet (R92/R93, filtered by
+# C190). GPIO20 is ADC1 channel 4 on the P4. The divider means the pin sees
+# VBAT/3, so 4.2V (full 1S LiPo) reads 1.4V — comfortably inside the 12db range.
+# Charging is handled by the ETA6003Q; its STAT pin drives the onboard LED only
+# and is not wired to a GPIO, so charge state can't be read in software.
+sensor:
+  - platform: adc
+    pin: GPIO20
+    id: battery_voltage
+    name: "Battery Voltage"
+    entity_category: diagnostic
+    attenuation: 12db
+    update_interval: 60s
+    accuracy_decimals: 2
+    unit_of_measurement: "V"
+    device_class: voltage
+    filters:
+      # Undo the on-board 200K/100K divider, then smooth out ADC noise.
+      - multiply: 3.0
+      - median:
+          window_size: 5
+          send_every: 5
+    on_value:
+      - script.execute: update_battery_indicator
+
+  - platform: template
+    id: battery_level
+    name: "Battery Level"
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    device_class: battery
+    accuracy_decimals: 0
+    update_interval: never
+
+script:
+  - id: update_battery_indicator
+    then:
+      - lambda: |-
+          float v = id(battery_voltage).state;
+
+          // Nothing on the BAT header: the divider reads near 0V and the panel
+          // is running from USB. Show that rather than a fake 0%.
+          if (isnan(v) || v < 2.5f) {
+            lv_label_set_text(id(battery_icon), "$mdi_power_plug");
+            lv_label_set_text(id(battery_label), "USB");
+            lv_obj_set_style_text_color(id(battery_icon), lv_color_hex(0x666666), LV_PART_MAIN);
+            lv_obj_set_style_text_color(id(battery_label), lv_color_hex(0x666666), LV_PART_MAIN);
+            return;
+          }
+
+          // 1S LiPo resting-voltage -> state of charge. The cell curve is flat
+          // through the middle, so a straight 3.3-4.2V map would read badly.
+          static const float CURVE[][2] = {
+            {3.30f, 0.0f},  {3.50f, 10.0f}, {3.60f, 20.0f}, {3.70f, 32.0f},
+            {3.75f, 42.0f}, {3.85f, 55.0f}, {3.95f, 70.0f}, {4.05f, 85.0f},
+            {4.20f, 100.0f},
+          };
+          const int LAST = (sizeof(CURVE) / sizeof(CURVE[0])) - 1;
+          float pct;
+          if (v <= CURVE[0][0]) {
+            pct = 0.0f;
+          } else if (v >= CURVE[LAST][0]) {
+            pct = 100.0f;
+          } else {
+            pct = 0.0f;
+            for (int i = 0; i < LAST; i++) {
+              if (v >= CURVE[i][0] && v <= CURVE[i + 1][0]) {
+                float span = CURVE[i + 1][0] - CURVE[i][0];
+                pct = CURVE[i][1] + (v - CURVE[i][0]) / span * (CURVE[i + 1][1] - CURVE[i][1]);
+                break;
+              }
+            }
+          }
+          id(battery_level).publish_state(pct);
+
+          const char *glyph;
+          if      (pct >= 95) glyph = "$mdi_battery";
+          else if (pct >= 85) glyph = "$mdi_battery_90";
+          else if (pct >= 75) glyph = "$mdi_battery_80";
+          else if (pct >= 65) glyph = "$mdi_battery_70";
+          else if (pct >= 55) glyph = "$mdi_battery_60";
+          else if (pct >= 45) glyph = "$mdi_battery_50";
+          else if (pct >= 35) glyph = "$mdi_battery_40";
+          else if (pct >= 25) glyph = "$mdi_battery_30";
+          else if (pct >= 15) glyph = "$mdi_battery_20";
+          else if (pct >= 5)  glyph = "$mdi_battery_10";
+          else                glyph = "$mdi_battery_alert";
+          lv_label_set_text(id(battery_icon), glyph);
+
+          char buf[8];
+          snprintf(buf, sizeof(buf), "%d%%", (int) lroundf(pct));
+          lv_label_set_text(id(battery_label), buf);
+
+          lv_color_t c = (pct < 15)  ? lv_color_hex(0xFF0000)   // critical
+                       : (pct < 30)  ? lv_color_hex(0xF37320)   // low
+                                     : lv_color_hex(0x7ACF38);  // healthy
+          lv_obj_set_style_text_color(id(battery_icon), c, LV_PART_MAIN);
+          lv_obj_set_style_text_color(id(battery_label), c, LV_PART_MAIN);
 
 micro_wake_word:
   id: mww

@@ -13,6 +13,26 @@
 # ".12" default instead of the intended "5"). Keep substitutions in each device file's own
 # top-level `substitutions:` block instead.
 
+# The info page (pages/info.yaml, in the submodule) ships a "Connected SSID"
+# row we don't want. Its value label has an id, but the caption next to it
+# doesn't, so there's nothing to override from here — and patching the
+# submodule would break `git submodule update`. Instead, hide the value label
+# and its caption (the immediately preceding widget in the same grid) once the
+# UI exists. Both cells are in grid row 5, which is `content`-sized, so the row
+# collapses when its only two children are hidden.
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - lambda: |-
+            lv_obj_t *value = id(connected_ssid_label);
+            lv_obj_t *grid = lv_obj_get_parent(value);
+            uint32_t idx = lv_obj_get_index(value);
+            lv_obj_add_flag(value, LV_OBJ_FLAG_HIDDEN);
+            if (idx > 0) {
+              lv_obj_add_flag(lv_obj_get_child(grid, idx - 1), LV_OBJ_FLAG_HIDDEN);
+            }
+
 # Time update script - This is run once per second. Use it to update any time related labels.
 script:
   # --------------------------------------------------------------------------
@@ -108,8 +128,21 @@ font:
     size: 40
     bpp: 8
     glyphs: [
+      $mdi_battery,  # mdi-battery - battery indicator, full
+      $mdi_battery_10,  # mdi-battery-10 - battery indicator, 10%
+      $mdi_battery_20,  # mdi-battery-20 - battery indicator, 20%
+      $mdi_battery_30,  # mdi-battery-30 - battery indicator, 30%
+      $mdi_battery_40,  # mdi-battery-40 - battery indicator, 40%
+      $mdi_battery_50,  # mdi-battery-50 - battery indicator, 50%
+      $mdi_battery_60,  # mdi-battery-60 - battery indicator, 60%
+      $mdi_battery_70,  # mdi-battery-70 - battery indicator, 70%
+      $mdi_battery_80,  # mdi-battery-80 - battery indicator, 80%
+      $mdi_battery_90,  # mdi-battery-90 - battery indicator, 90%
+      $mdi_battery_alert,  # mdi-battery-alert - battery critically low
+      $mdi_battery_outline,  # mdi-battery-outline - battery indicator, empty
       $mdi_bed,  # mdi-bed - bedroom icon
       $mdi_brightness_6,  # mdi-brightness-6 - brightness slider icon
+      $mdi_power_plug,  # mdi-power-plug - running on USB, no battery fitted
       $mdi_bulkhead_light,  # mdi-bulkhead-light - bulkhead fixture
       $mdi_ceiling_fan_light,  # mdi-ceiling-fan-light - ceiling fan with light
       $mdi_ceiling_light,  # mdi-ceiling-light - ceiling fixture

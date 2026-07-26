@@ -66,6 +66,11 @@ text_sensor:
 # above). Reuses the library's aqi_pill_widget; the color-band logic matches
 # ui/weather/aqi_pill.yaml, which we can't include directly because it is
 # hardwired to the Pirate Weather module's update hook.
+#
+# The monitoring station publishes irregularly and often omits individual
+# pollutants, which reaches ESPHome as NaN. Every handler below skips the
+# update in that case, so the panel keeps showing the last real reading
+# instead of blanking. Labels only read "--" before the first value arrives.
 sensor:
   - platform: homeassistant
     id: weather_aqi
@@ -80,42 +85,56 @@ sensor:
     entity_id: $weather_no2_entity
     on_value:
       then:
-        - lvgl.label.update:
-            id: aqi_no2_value
-            text: !lambda 'return isnan(x) ? std::string("--") : str_sprintf("%.0f", x);'
+        - if:
+            condition:
+              lambda: 'return !isnan(x);'
+            then:
+              - lvgl.label.update:
+                  id: aqi_no2_value
+                  text: !lambda 'return str_sprintf("%.0f", x);'
 
   - platform: homeassistant
     id: weather_o3
     entity_id: $weather_o3_entity
     on_value:
       then:
-        - lvgl.label.update:
-            id: aqi_o3_value
-            text: !lambda 'return isnan(x) ? std::string("--") : str_sprintf("%.0f", x);'
+        - if:
+            condition:
+              lambda: 'return !isnan(x);'
+            then:
+              - lvgl.label.update:
+                  id: aqi_o3_value
+                  text: !lambda 'return str_sprintf("%.0f", x);'
 
   - platform: homeassistant
     id: weather_so2
     entity_id: $weather_so2_entity
     on_value:
       then:
-        - lvgl.label.update:
-            id: aqi_so2_value
-            text: !lambda 'return isnan(x) ? std::string("--") : str_sprintf("%.0f", x);'
+        - if:
+            condition:
+              lambda: 'return !isnan(x);'
+            then:
+              - lvgl.label.update:
+                  id: aqi_so2_value
+                  text: !lambda 'return str_sprintf("%.0f", x);'
 
 script:
   - id: update_aqi_pill
     then:
       - lambda: |-
+          // Station reported nothing this cycle — leave the pill showing the
+          // last good reading rather than blanking it.
+          if (isnan(id(weather_aqi).state)) return;
+
           // US EPA AQI color bands (bg) with a readable text color.
-          int aqi = isnan(id(weather_aqi).state) ? -1 : (int) lroundf(id(weather_aqi).state);
+          int aqi = (int) lroundf(id(weather_aqi).state);
           char buf[8];
-          if (aqi < 0) snprintf(buf, sizeof(buf), "--");
-          else         snprintf(buf, sizeof(buf), "%d", aqi);
+          snprintf(buf, sizeof(buf), "%d", aqi);
           lv_label_set_text(id(aqi_pill_label), buf);
           lv_color_t bg;
           lv_color_t fg = lv_color_white();
-          if (aqi < 0)         { bg = lv_color_hex(0x9E9E9E); }              // unknown - gray
-          else if (aqi <= 50)  { bg = lv_color_hex(0x00E400); fg = lv_color_black(); } // Good
+          if (aqi <= 50)       { bg = lv_color_hex(0x00E400); fg = lv_color_black(); } // Good
           else if (aqi <= 100) { bg = lv_color_hex(0xFFFF00); fg = lv_color_black(); } // Moderate
           else if (aqi <= 150) { bg = lv_color_hex(0xFF7E00); fg = lv_color_black(); } // Unhealthy (sensitive)
           else if (aqi <= 200) { bg = lv_color_hex(0xFF0000); }              // Unhealthy
