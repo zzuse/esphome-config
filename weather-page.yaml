@@ -1,0 +1,445 @@
+---
+# Dedicated full-screen weather page for the 1280x800 landscape screen
+# (the 10.1" 800x1280 panel rotated 270°, and the SDL sim at the same size).
+#
+# Data comes from Home Assistant entity weather.forecast_home via the library's
+# weather packages:
+#   - ui/weather/today.yaml    — current conditions (temp, humidity, pressure,
+#                                wind, visibility, condition icon)
+#   - ui/weather/forecast.yaml — 4-day forecast via the weather.get_forecasts action
+# Those packages update the widget IDs defined on the page below.
+
+substitutions:
+  # HA entity that reports a numeric Air Quality Index (US EPA scale) for the
+  # AQI pill in the summary row. Easy sources: the WAQI or AirNow integrations
+  # in HA, or your own PM2.5 sensor. The pill shows "--" until the entity
+  # exists and reports a value. Override per-device in the device file's
+  # top-level substitutions if needed.
+  weather_aqi_entity: sensor.winnipeg_ellen_st_manitoba_canada_air_quality_index
+  # Individual pollutant sensors from the same WAQI station (values are
+  # WAQI individual-AQI index numbers, not µg/m³).
+  weather_no2_entity: sensor.winnipeg_ellen_st_manitoba_canada_nitrogen_dioxide
+  weather_o3_entity: sensor.winnipeg_ellen_st_manitoba_canada_ozone
+  weather_so2_entity: sensor.winnipeg_ellen_st_manitoba_canada_sulphur_dioxide
+
+packages:
+  # Current weather + 200px condition icon
+  weather_today_200: !include
+    file: esphome-modular-lvgl-buttons/ui/weather/today.yaml
+    vars:
+      size: 200
+      weather_entity: weather.forecast_home
+      # No text summary sensor configured — replace with a real HA sensor
+      # (e.g. a template/forecast summary sensor) to fill the summary row.
+      weather_summary: sensor.none
+
+  # 4-day forecast + 100px condition icons
+  weather_forecast_100: !include
+    file: esphome-modular-lvgl-buttons/ui/weather/forecast.yaml
+    vars:
+      size: 100
+      weather_entity: weather.forecast_home
+
+# Metric unit overrides — the library's today.yaml hardcodes "mph" and "mi",
+# but HA (metric) sends wind in km/h and visibility in km. ESPHome appends
+# these !extend handlers after the library's own on_value handlers, so the
+# labels are rewritten with metric units on every update.
+text_sensor:
+  - id: !extend weather_wind_speed
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: weather_wind_speed_today
+            text: !lambda |-
+              int speed = (int)(atof(x.c_str()) + 0.5);
+              return str_sprintf("%d km/h", speed);
+
+  - id: !extend weather_visibility
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: weather_visibility_today
+            text: !lambda |-
+              return str_sprintf("%.0f km", atof(x.c_str()));
+
+# Air quality pill — fed from a numeric AQI sensor in HA (see substitutions
+# above). Reuses the library's aqi_pill_widget; the color-band logic matches
+# ui/weather/aqi_pill.yaml, which we can't include directly because it is
+# hardwired to the Pirate Weather module's update hook.
+sensor:
+  - platform: homeassistant
+    id: weather_aqi
+    entity_id: $weather_aqi_entity
+    on_value:
+      then:
+        - script.execute: update_aqi_pill
+
+  # Individual pollutants shown next to the AQI pill
+  - platform: homeassistant
+    id: weather_no2
+    entity_id: $weather_no2_entity
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: aqi_no2_value
+            text: !lambda 'return isnan(x) ? std::string("--") : str_sprintf("%.0f", x);'
+
+  - platform: homeassistant
+    id: weather_o3
+    entity_id: $weather_o3_entity
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: aqi_o3_value
+            text: !lambda 'return isnan(x) ? std::string("--") : str_sprintf("%.0f", x);'
+
+  - platform: homeassistant
+    id: weather_so2
+    entity_id: $weather_so2_entity
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: aqi_so2_value
+            text: !lambda 'return isnan(x) ? std::string("--") : str_sprintf("%.0f", x);'
+
+script:
+  - id: update_aqi_pill
+    then:
+      - lambda: |-
+          // US EPA AQI color bands (bg) with a readable text color.
+          int aqi = isnan(id(weather_aqi).state) ? -1 : (int) lroundf(id(weather_aqi).state);
+          char buf[8];
+          if (aqi < 0) snprintf(buf, sizeof(buf), "--");
+          else         snprintf(buf, sizeof(buf), "%d", aqi);
+          lv_label_set_text(id(aqi_pill_label), buf);
+          lv_color_t bg;
+          lv_color_t fg = lv_color_white();
+          if (aqi < 0)         { bg = lv_color_hex(0x9E9E9E); }              // unknown - gray
+          else if (aqi <= 50)  { bg = lv_color_hex(0x00E400); fg = lv_color_black(); } // Good
+          else if (aqi <= 100) { bg = lv_color_hex(0xFFFF00); fg = lv_color_black(); } // Moderate
+          else if (aqi <= 150) { bg = lv_color_hex(0xFF7E00); fg = lv_color_black(); } // Unhealthy (sensitive)
+          else if (aqi <= 200) { bg = lv_color_hex(0xFF0000); }              // Unhealthy
+          else if (aqi <= 300) { bg = lv_color_hex(0x8F3F97); }              // Very Unhealthy
+          else                 { bg = lv_color_hex(0x7E0023); }              // Hazardous
+          lv_obj_set_style_bg_color(id(aqi_pill), bg, LV_PART_MAIN);
+          lv_obj_set_style_text_color(id(aqi_pill_title), fg, LV_PART_MAIN);
+          lv_obj_set_style_text_color(id(aqi_pill_label), fg, LV_PART_MAIN);
+
+# Styles for the weather page
+.weather_page_styles:
+  # A tile on the 4x4 grid: dark rounded card, contents stacked and centered
+  - &weather_cell
+    grid_cell_x_align: stretch
+    grid_cell_y_align: stretch
+    bg_color: very_dark_gray
+    bg_opa: cover
+    radius: 6
+    pad_all: 4
+    scrollbar_mode: "OFF"
+    layout:
+      type: flex
+      flex_flow: COLUMN
+      flex_align_main: center
+      flex_align_cross: center
+      flex_align_track: center
+      pad_row: 4
+
+  # Small gray caption above a value
+  - &weather_caption
+    height: SIZE_CONTENT
+    text_font: nunito_20
+    text_color: $label_off_color
+
+  # A value label
+  - &weather_value
+    height: SIZE_CONTENT
+    text_color: $label_on_color
+
+  # A caption+value pair in the AQI row (transparent, content-sized)
+  - &aqi_stat_cell
+    width: SIZE_CONTENT
+    height: SIZE_CONTENT
+    bg_opa: TRANSP
+    border_width: 0
+    pad_all: 0
+    scrollbar_mode: "OFF"
+    layout:
+      type: flex
+      flex_flow: COLUMN
+      flex_align_cross: center
+      pad_row: 2
+
+  # Forecast card labels
+  - &forecast_label
+    height: SIZE_CONTENT
+    text_font: nunito_24
+    text_color: $label_on_color
+
+lvgl:
+  pages:
+    - id: weather_page
+      # Explicit grid instead of the 4x4 shorthand: the forecast row (FR 29)
+      # gets extra height so the blue low-temperature labels aren't clipped,
+      # and pad_bottom keeps the cards off the screen edge.
+      layout:
+        type: grid
+        grid_rows: [FR(24), FR(24), FR(17), FR(29)]
+        grid_columns: [FR(1), FR(1), FR(1), FR(1)]
+      pad_bottom: 14
+      styles: page_style
+      <<: !include esphome-modular-lvgl-buttons/common/swipe_navigation.yaml
+      widgets:
+
+        # ── Row 0-1, left: current temperature + humidity ────────────────
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 0
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *weather_value
+                  id: weather_temperature_today
+                  text_font: nunito_72
+                  text: "---°"
+
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 1
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *weather_caption
+                  text: "Humidity"
+              - label:
+                  <<: *weather_value
+                  id: weather_humidity_today
+                  text_font: nunito_48
+                  text: "---%"
+
+        # ── Row 1, left: wind / pressure / visibility ────────────────────
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 0
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *weather_caption
+                  text: "Wind"
+              - label:
+                  <<: *weather_value
+                  id: weather_wind_speed_today
+                  text_font: nunito_36
+                  text: "---"
+              - label:
+                  <<: *weather_value
+                  id: weather_wind_dir_today
+                  text_font: nunito_24
+                  text: "---"
+
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 1
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *weather_caption
+                  text: "Pressure"
+              - label:
+                  <<: *weather_value
+                  id: weather_pressure_today
+                  text_font: nunito_24
+                  text: "--- hPa"
+              - label:
+                  <<: *weather_caption
+                  text: "Visibility"
+              - label:
+                  <<: *weather_value
+                  id: weather_visibility_today
+                  text_font: nunito_24
+                  text: "---"
+
+        # ── Rows 0-1, right: big current condition icon ──────────────────
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 2
+            grid_cell_row_span: 2
+            grid_cell_column_span: 2
+            widgets:
+              - image:
+                  src: unknown_200
+                  id: weather_condition_icon
+
+        # ── Row 2: AQI pill + pollutant indices, centered ────────────────
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 0
+            grid_cell_row_span: 1
+            grid_cell_column_span: 4
+            pad_all: 10
+            layout:
+              type: flex
+              flex_flow: ROW
+              flex_align_main: center
+              flex_align_cross: center
+              pad_column: 40
+            widgets:
+              - !include
+                  file: esphome-modular-lvgl-buttons/ui/weather/aqi_pill_widget.yaml
+                  vars:
+                    aqi_label_font: nunito_20
+                    aqi_value_font: nunito_36
+              - obj:
+                  <<: *aqi_stat_cell
+                  widgets:
+                    - label:
+                        <<: *weather_caption
+                        text: "NO2"
+                    - label:
+                        <<: *weather_value
+                        id: aqi_no2_value
+                        text_font: nunito_36
+                        text: "--"
+              - obj:
+                  <<: *aqi_stat_cell
+                  widgets:
+                    - label:
+                        <<: *weather_caption
+                        text: "O3"
+                    - label:
+                        <<: *weather_value
+                        id: aqi_o3_value
+                        text_font: nunito_36
+                        text: "--"
+              - obj:
+                  <<: *aqi_stat_cell
+                  widgets:
+                    - label:
+                        <<: *weather_caption
+                        text: "SO2"
+                    - label:
+                        <<: *weather_value
+                        id: aqi_so2_value
+                        text_font: nunito_36
+                        text: "--"
+              # Text summary — no summary sensor is configured (see the
+              # weather_summary var above), so this stays hidden. If you add
+              # a real summary sensor, remove `hidden` and give this label
+              # `flex_grow: 1` (and switch flex_align_main back to start).
+              - label:
+                  id: weather_summary_today
+                  hidden: true
+                  text: ""
+                  text_font: nunito_24
+                  text_color: $label_on_color
+                  text_align: LEFT
+
+        # ── Row 3: 4-day forecast cards ──────────────────────────────────
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 0
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *forecast_label
+                  id: forecast_day_0
+                  text: "???"
+              - image:
+                  id: forecast_condition_icon_0
+                  src: unknown_100
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_hi_0
+                  text: "---°"
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_lo_0
+                  text_font: nunito_20
+                  text_color: sky_blue
+                  text: "---°"
+
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 1
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *forecast_label
+                  id: forecast_day_1
+                  text: "???"
+              - image:
+                  id: forecast_condition_icon_1
+                  src: unknown_100
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_hi_1
+                  text: "---°"
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_lo_1
+                  text_font: nunito_20
+                  text_color: sky_blue
+                  text: "---°"
+
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 2
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *forecast_label
+                  id: forecast_day_2
+                  text: "???"
+              - image:
+                  id: forecast_condition_icon_2
+                  src: unknown_100
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_hi_2
+                  text: "---°"
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_lo_2
+                  text_font: nunito_20
+                  text_color: sky_blue
+                  text: "---°"
+
+        - obj:
+            <<: *weather_cell
+            grid_cell_row_pos: 3
+            grid_cell_column_pos: 3
+            grid_cell_row_span: 1
+            grid_cell_column_span: 1
+            widgets:
+              - label:
+                  <<: *forecast_label
+                  id: forecast_day_3
+                  text: "???"
+              - image:
+                  id: forecast_condition_icon_3
+                  src: unknown_100
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_hi_3
+                  text: "---°"
+              - label:
+                  <<: *forecast_label
+                  id: forecast_temperature_lo_3
+                  text_font: nunito_20
+                  text_color: sky_blue
+                  text: "---°"

@@ -38,6 +38,9 @@ packages:
   # info screen - WiFi login, IP address, MAC address etc
   info_screen: !include esphome-modular-lvgl-buttons/pages/info.yaml
 
+  # Dedicated full-screen weather page (weather.forecast_home) — swipe to reach it
+  weather_page: !include weather-page.yaml
+
   # This section will add buttons and page to your screen using the ESPHome package system.
   # Each package has all the code required for the button or page (LVGL, sensors, etc)
 
