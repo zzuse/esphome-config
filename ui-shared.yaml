@@ -75,15 +75,9 @@ packages:
       icon: $mdi_lightbulb
       entity_id: "switch.athom_smart_plug_v3_50ebc0_switch"
 
-  # Add a button that displays the time
-  button_2: !include
-    file: esphome-modular-lvgl-buttons/ui/clock/time_button.yaml
-    vars:
-      uid: button_2
-      row: 0
-      column: 3
-      text: 00:00
-      click_page: info_screen
+  # Big colourful clock + one-month calendar, filling the right-hand block of
+  # the main grid. Replaces the old small time button (ui/clock/time_button.yaml).
+  clock_calendar: !include clock-calendar.yaml
 
   # Add a button that goes to a different page
   button_3: !include

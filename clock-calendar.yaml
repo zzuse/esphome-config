@@ -1,0 +1,458 @@
+---
+# Big colourful clock + one-month calendar for the main page.
+#
+# Occupies the free right-hand block of the 6x10 main grid: the clock spans
+# rows 0-1 and the calendar rows 2-5, both across columns 2-8. Included from
+# ui-shared.yaml so the real panel and the SDL simulator stay identical.
+#
+# Both are redrawn by the shared `time_update` script, which the time platform
+# runs once a minute (and on every time sync), so the clock ticks and the
+# calendar rolls over at midnight without any extra timer.
+
+font:
+  # Digits only — a full glyphset at this size would waste a lot of flash.
+  - file: "esphome-modular-lvgl-buttons/assets/fonts/Nunito-SemiBold.ttf"
+    id: clock_font_120
+    size: 120
+    bpp: 8
+    glyphs: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ":"]
+
+.clock_calendar_styles:
+  # One day cell: a fixed 60x60 box so the "today" highlight is a clean circle.
+  # Labels draw text from the top of their content area, so pad_top does the
+  # vertical centring for nunito_24 (~33px line height).
+  - &cal_day
+    width: 60
+    height: 60
+    radius: 30
+    pad_top: 13
+    text_font: nunito_24
+    text_align: CENTER
+    text_color: $label_on_color
+    bg_color: $button_on_color
+    bg_opa: TRANSP
+    grid_cell_x_align: CENTER
+    grid_cell_y_align: CENTER
+    text: ""
+
+  - &cal_header
+    width: 60
+    text_font: nunito_20
+    text_align: CENTER
+    text_color: $label_off_color
+    grid_cell_x_align: CENTER
+    grid_cell_y_align: CENTER
+
+lvgl:
+  pages:
+    - id: !extend main_page
+      widgets:
+
+        # ── Clock: rows 0-1, columns 2-8 ────────────────────────────────
+        - container:
+            id: clock_tile
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 2
+            grid_cell_row_span: 2
+            grid_cell_column_span: 7
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            widgets:
+              - obj:
+                  align: CENTER
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_cross: CENTER
+                    pad_row: 0
+                  widgets:
+                    # Hours / minutes get their own colours, so the time reads
+                    # as one graphic rather than a wall of digits.
+                    - obj:
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        layout:
+                          type: flex
+                          flex_flow: ROW
+                          flex_align_cross: END
+                          pad_column: 0
+                        widgets:
+                          - label:
+                              id: clock_hours
+                              text_font: clock_font_120
+                              text_color: ep_orange
+                              text: "12"
+                          - label:
+                              id: clock_colon
+                              text_font: clock_font_120
+                              text_color: gray600
+                              text: ":"
+                          - label:
+                              id: clock_minutes
+                              text_font: clock_font_120
+                              text_color: ep_blue
+                              text: "00"
+                          - label:
+                              id: clock_ampm
+                              text_font: nunito_36
+                              text_color: ep_green
+                              pad_left: 10
+                              pad_bottom: 22
+                              text: "am"
+                    - label:
+                        id: clock_date
+                        text_font: nunito_36
+                        text_color: $label_on_color
+                        text: "---"
+
+        # ── Calendar: rows 2-5, columns 2-8 ─────────────────────────────
+        - container:
+            id: calendar_tile
+            grid_cell_row_pos: 2
+            grid_cell_column_pos: 2
+            grid_cell_row_span: 4
+            grid_cell_column_span: 7
+            grid_cell_x_align: stretch
+            grid_cell_y_align: stretch
+            widgets:
+              - obj:
+                  width: 100%
+                  height: 100%
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  scrollbar_mode: "OFF"
+                  layout:
+                    type: flex
+                    flex_flow: COLUMN
+                    flex_align_cross: CENTER
+                    pad_row: 2
+                  widgets:
+                    - label:
+                        id: calendar_title
+                        text_font: nunito_36
+                        text_color: ep_orange
+                        text: "---"
+                    - obj:
+                        width: 100%
+                        flex_grow: 1
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        scrollbar_mode: "OFF"
+                        layout:
+                          type: GRID
+                          grid_columns: [FR(1), FR(1), FR(1), FR(1), FR(1), FR(1), FR(1)]
+                          grid_rows: [CONTENT, FR(1), FR(1), FR(1), FR(1), FR(1), FR(1)]
+                        widgets:
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 0
+                              text: "Su"
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 1
+                              text: "Mo"
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 2
+                              text: "Tu"
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 3
+                              text: "We"
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 4
+                              text: "Th"
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 5
+                              text: "Fr"
+                          - label:
+                              <<: *cal_header
+                              grid_cell_row_pos: 0
+                              grid_cell_column_pos: 6
+                              text: "Sa"
+                          - label:
+                              <<: *cal_day
+                              id: cal_d0
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 0
+                          - label:
+                              <<: *cal_day
+                              id: cal_d1
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 1
+                          - label:
+                              <<: *cal_day
+                              id: cal_d2
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 2
+                          - label:
+                              <<: *cal_day
+                              id: cal_d3
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 3
+                          - label:
+                              <<: *cal_day
+                              id: cal_d4
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 4
+                          - label:
+                              <<: *cal_day
+                              id: cal_d5
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 5
+                          - label:
+                              <<: *cal_day
+                              id: cal_d6
+                              grid_cell_row_pos: 1
+                              grid_cell_column_pos: 6
+                          - label:
+                              <<: *cal_day
+                              id: cal_d7
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 0
+                          - label:
+                              <<: *cal_day
+                              id: cal_d8
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 1
+                          - label:
+                              <<: *cal_day
+                              id: cal_d9
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 2
+                          - label:
+                              <<: *cal_day
+                              id: cal_d10
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 3
+                          - label:
+                              <<: *cal_day
+                              id: cal_d11
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 4
+                          - label:
+                              <<: *cal_day
+                              id: cal_d12
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 5
+                          - label:
+                              <<: *cal_day
+                              id: cal_d13
+                              grid_cell_row_pos: 2
+                              grid_cell_column_pos: 6
+                          - label:
+                              <<: *cal_day
+                              id: cal_d14
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 0
+                          - label:
+                              <<: *cal_day
+                              id: cal_d15
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 1
+                          - label:
+                              <<: *cal_day
+                              id: cal_d16
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 2
+                          - label:
+                              <<: *cal_day
+                              id: cal_d17
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 3
+                          - label:
+                              <<: *cal_day
+                              id: cal_d18
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 4
+                          - label:
+                              <<: *cal_day
+                              id: cal_d19
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 5
+                          - label:
+                              <<: *cal_day
+                              id: cal_d20
+                              grid_cell_row_pos: 3
+                              grid_cell_column_pos: 6
+                          - label:
+                              <<: *cal_day
+                              id: cal_d21
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 0
+                          - label:
+                              <<: *cal_day
+                              id: cal_d22
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 1
+                          - label:
+                              <<: *cal_day
+                              id: cal_d23
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 2
+                          - label:
+                              <<: *cal_day
+                              id: cal_d24
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 3
+                          - label:
+                              <<: *cal_day
+                              id: cal_d25
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 4
+                          - label:
+                              <<: *cal_day
+                              id: cal_d26
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 5
+                          - label:
+                              <<: *cal_day
+                              id: cal_d27
+                              grid_cell_row_pos: 4
+                              grid_cell_column_pos: 6
+                          - label:
+                              <<: *cal_day
+                              id: cal_d28
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 0
+                          - label:
+                              <<: *cal_day
+                              id: cal_d29
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 1
+                          - label:
+                              <<: *cal_day
+                              id: cal_d30
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 2
+                          - label:
+                              <<: *cal_day
+                              id: cal_d31
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 3
+                          - label:
+                              <<: *cal_day
+                              id: cal_d32
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 4
+                          - label:
+                              <<: *cal_day
+                              id: cal_d33
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 5
+                          - label:
+                              <<: *cal_day
+                              id: cal_d34
+                              grid_cell_row_pos: 5
+                              grid_cell_column_pos: 6
+                          - label:
+                              <<: *cal_day
+                              id: cal_d35
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 0
+                          - label:
+                              <<: *cal_day
+                              id: cal_d36
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 1
+                          - label:
+                              <<: *cal_day
+                              id: cal_d37
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 2
+                          - label:
+                              <<: *cal_day
+                              id: cal_d38
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 3
+                          - label:
+                              <<: *cal_day
+                              id: cal_d39
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 4
+                          - label:
+                              <<: *cal_day
+                              id: cal_d40
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 5
+                          - label:
+                              <<: *cal_day
+                              id: cal_d41
+                              grid_cell_row_pos: 6
+                              grid_cell_column_pos: 6
+
+
+script:
+  - id: !extend time_update
+    then:
+      - lambda: |-
+          auto now = id(system_time).now();
+          if (!now.is_valid()) return;
+
+          // ---- Clock ----
+          int hour12 = now.hour % 12;
+          if (hour12 == 0) hour12 = 12;
+          lv_label_set_text(id(clock_hours), str_sprintf("%d", hour12).c_str());
+          lv_label_set_text(id(clock_minutes), str_sprintf("%02d", now.minute).c_str());
+          lv_label_set_text(id(clock_ampm), now.hour < 12 ? "am" : "pm");
+          // Day appended separately: %e space-pads and %d zero-pads, so both
+          // look wrong for single-digit days.
+          lv_label_set_text(id(clock_date),
+              str_sprintf("%s %d", now.strftime("%A, %B").c_str(),
+                          now.day_of_month).c_str());
+
+          // ---- Calendar ----
+          static const char *MONTHS[] = {
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+          };
+          lv_label_set_text(id(calendar_title),
+              str_sprintf("%s %d", MONTHS[now.month - 1], now.year).c_str());
+
+          lv_obj_t *cells[42] = {
+            id(cal_d0), id(cal_d1), id(cal_d2), id(cal_d3), id(cal_d4), id(cal_d5), id(cal_d6),
+            id(cal_d7), id(cal_d8), id(cal_d9), id(cal_d10), id(cal_d11), id(cal_d12), id(cal_d13),
+            id(cal_d14), id(cal_d15), id(cal_d16), id(cal_d17), id(cal_d18), id(cal_d19), id(cal_d20),
+            id(cal_d21), id(cal_d22), id(cal_d23), id(cal_d24), id(cal_d25), id(cal_d26), id(cal_d27),
+            id(cal_d28), id(cal_d29), id(cal_d30), id(cal_d31), id(cal_d32), id(cal_d33), id(cal_d34),
+            id(cal_d35), id(cal_d36), id(cal_d37), id(cal_d38), id(cal_d39), id(cal_d40), id(cal_d41)
+          };
+
+          // day_of_week is 1=Sunday, so shift to 0=Sunday to match the columns.
+          int today = now.day_of_month;
+          int dow_today = now.day_of_week - 1;
+          int first_dow = (((dow_today - (today - 1)) % 7) + 7) % 7;
+          int ndays = days_in_month(now.month, now.year);
+
+          for (int i = 0; i < 42; i++) {
+            int day = i - first_dow + 1;
+            if (day < 1 || day > ndays) {
+              lv_label_set_text(cells[i], "");
+              lv_obj_set_style_bg_opa(cells[i], LV_OPA_TRANSP, LV_PART_MAIN);
+              continue;
+            }
+            lv_label_set_text(cells[i], str_sprintf("%d", day).c_str());
+            bool is_today = (day == today);
+            lv_obj_set_style_bg_opa(cells[i], is_today ? LV_OPA_COVER : LV_OPA_TRANSP,
+                                    LV_PART_MAIN);
+            lv_obj_set_style_text_color(cells[i],
+                is_today ? lv_color_black() : lv_color_hex(0xF2F0EB), LV_PART_MAIN);
+          }
