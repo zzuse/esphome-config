@@ -75,9 +75,20 @@ Requires [ESPHome](https://esphome.io/) 2026.7.0+ and, for SVG image support, `c
 
 ```bash
 esphome run my-panel.yaml      # flash the real device
+esphome logs my-panel.yaml     # see logs
+# After first build, use OTA update afterwards
+esphome compile my-panel.yaml                                        # build only
+esphome upload  my-panel.yaml --device waveshare-p4-lcd-10-1.local   # push an existing build
+esphome logs    my-panel.yaml --device waveshare-p4-lcd-10-1.local   # just watch logs
+```
+
+Simulator
+
+```bash
 esphome run sim.yaml           # run the SDL simulator locally
 esphome config sim.yaml > /tmp/sim.txt  # test config
-esphome logs my-panel.yaml     # see logs
+esphome run sim-weather-shot.yaml # weather SDL simulator page
+curl http://localhost:8080/screenshot > shot.png
 ```
 
 ## Further docs

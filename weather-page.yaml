@@ -120,6 +120,21 @@ sensor:
                   text: !lambda 'return str_sprintf("%.0f", x);'
 
 script:
+  # Corner date+time on the weather page. `time_update` lives in ui-shared.yaml
+  # and is fired by backlight_time.yaml on every time sync and once a minute,
+  # so this rides along with the clock/calendar page's own !extend.
+  - id: !extend time_update
+    then:
+      - lambda: |-
+          auto now = id(system_time).now();
+          if (!now.is_valid()) return;
+          // Day appended separately: %e space-pads and %d zero-pads, so
+          // neither looks right for single-digit days (same trick as
+          // clock-calendar.yaml).
+          lv_label_set_text(id(weather_datetime),
+              str_sprintf("%s %d  %02d:%02d", now.strftime("%a %b").c_str(),
+                          now.day_of_month, now.hour, now.minute).c_str());
+
   - id: update_aqi_pill
     then:
       - lambda: |-
@@ -293,6 +308,18 @@ lvgl:
             grid_cell_row_span: 2
             grid_cell_column_span: 2
             widgets:
+              # Short date + time tucked into the card's top-right corner.
+              # `ignore_layout` pulls it out of the flex COLUMN flow so the
+              # condition icon stays centred in the cell as before.
+              - label:
+                  id: weather_datetime
+                  ignore_layout: true
+                  align: TOP_RIGHT
+                  x: -6
+                  y: 6
+                  text_font: nunito_24
+                  text_color: amber
+                  text: "--- --- --  --:--"
               - image:
                   src: unknown_200
                   id: weather_condition_icon

@@ -1,0 +1,66 @@
+---
+# Throwaway SDL harness: renders ONLY weather-page.yaml at the real panel size
+# (1280x800) and exposes the screenshot endpoint, so layout changes can be
+# eyeballed without flashing hardware.
+#
+#   esphome run sim-weather-shot.yaml
+#   curl http://localhost:8080/screenshot > shot.png
+
+external_components:
+  - source:
+      type: local
+      path: esphome-modular-lvgl-buttons/components
+    components: [lvgl_screenshot]
+
+lvgl_screenshot:
+  port: 8080
+
+substitutions:
+  icon_font: mdi_icons_40
+  text_font: nunito_20
+  text_color: white
+  bg_color: black
+  button_on_color: "ep_orange"
+  button_off_color: "very_dark_gray"
+  icon_on_color: "yellow"
+  icon_off_color: "gray"
+  label_on_color: "white"
+  label_off_color: "gray"
+  button_text_color: "white"
+  screen_height: '800'
+  screen_width: '1280'
+
+esphome:
+  name: sdl-weather-shot
+  friendly_name: SDL Weather Shot
+  on_boot:
+    # info.yaml also registers a page; force the weather page to be the one
+    # on screen when the screenshot endpoint is scraped.
+    - priority: -100
+      then:
+        - lvgl.page.show: weather_page
+
+logger:
+  level: info
+
+# weather-page.yaml does `!extend time_update`, which ui-shared.yaml normally
+# provides. This harness skips ui-shared, so define the base script here.
+script:
+  - id: time_update
+    then:
+      - lambda: |-
+          // No operation
+
+packages:
+  theme: !include esphome-modular-lvgl-buttons/common/theme/index.yaml
+  sensors: !include esphome-modular-lvgl-buttons/common/sensors_base_sdl.yaml
+  info_screen: !include esphome-modular-lvgl-buttons/pages/info.yaml
+  time: !include esphome-modular-lvgl-buttons/common/time_homeassistant.yaml
+  hardware: !include esphome-modular-lvgl-buttons/hardware/SDL-lvgl.yaml
+  weather_page: !include weather-page.yaml
+
+# info.yaml's Exit button navigates to `main_page`; stub it so the harness links.
+lvgl:
+  pages:
+    - id: main_page
+      styles: page_style

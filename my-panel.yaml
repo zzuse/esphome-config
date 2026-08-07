@@ -14,12 +14,14 @@ substitutions:
   button_text_color: "white"
 
   # LCD back light modes - Code in backlight_time.yaml
-  display_daytime_brightness: "100%"
-  display_nighttime_brightness: "50%"
+  # Flat 40% around the clock: no sunrise ramp to full, no dimming at night,
+  # and the screen never blanks on idle.
+  display_daytime_brightness: "40%"
+  display_nighttime_brightness: "40%"
   display_night_hour: "0"      # Hour for night mode (0-23)
   display_night_minute: "0"    # Minute for night mode (0-59)
   display_backlight_timeout_always_enabled: "false"  # Set true to dim/off in all modes, not just Night
-  display_backlight_timeout_initial: "5"  # Initial backlight timeout in minutes (-1 to disable)
+  display_backlight_timeout_initial: "720"  # Idle blank timeout in minutes (720 = max, effectively never)
 
   # defaults for popup pages
   popup_timeout_seconds: '120'  # timeout in seconds
@@ -32,6 +34,15 @@ esphome:
     - priority: 400
       then:
         - script.execute: update_loading_page
+    # display_backlight_timeout is `restore_value: true`, so a previously stored
+    # 5 would survive this config change and still blank the screen at night.
+    # Pin it on every boot. Remove this block if you want the HA number entity
+    # to be authoritative again.
+    - priority: -100
+      then:
+        - number.set:
+            id: display_backlight_timeout
+            value: 720
 
 logger:
   level: debug
