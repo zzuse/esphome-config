@@ -22,6 +22,49 @@ substitutions:
   weather_o3_entity: sensor.winnipeg_ellen_st_manitoba_canada_ozone
   weather_so2_entity: sensor.winnipeg_ellen_st_manitoba_canada_sulphur_dioxide
 
+  # ── Personal "ESP32 Air Quality" node (MQTT discovery → HA) ──────────────
+  # HA prefixes MQTT-discovered entities with the device name ("ESP32 Air
+  # Quality"), so the ids are sensor.esp32_air_quality_esp32_*. Verified in
+  # HA Developer Tools → States. If you rename the entities in HA, update
+  # them here.
+  air_aqi_entity: sensor.esp32_air_quality_esp32_aqi
+  air_pm1_entity: sensor.esp32_air_quality_esp32_pm1_0
+  air_pm25_entity: sensor.esp32_air_quality_esp32_pm2_5
+  air_pm10_entity: sensor.esp32_air_quality_esp32_pm10
+  air_pm03_entity: sensor.esp32_air_quality_esp32_pm0_3_count
+  air_co2_entity: sensor.esp32_air_quality_esp32_co2
+  air_temp_entity: sensor.esp32_air_quality_esp32_temperature
+  air_hum_entity: sensor.esp32_air_quality_esp32_humidity
+  air_tvoc_entity: sensor.esp32_air_quality_esp32_tvoc
+  air_h2_entity: sensor.esp32_air_quality_esp32_h2
+  air_eth_entity: sensor.esp32_air_quality_esp32_ethanol
+
+  # "Good" ranges for the node's readings. A value inside [lo, hi] renders
+  # green, outside renders red, and the range is appended to the reading,
+  # e.g. "3000ppm(0~1000)". Tune per room/preference.
+  air_aqi_lo: "0"
+  air_aqi_hi: "50"        # US EPA "Good" band
+  air_pm1_lo: "0"
+  air_pm1_hi: "10"        # ug/m3 — no official band, WHO-ish guideline
+  air_pm25_lo: "0"
+  air_pm25_hi: "12"       # ug/m3 — US EPA "Good" breakpoint
+  air_pm10_lo: "0"
+  air_pm10_hi: "54"       # ug/m3 — US EPA "Good" breakpoint
+  air_pm03_lo: "0"
+  air_pm03_hi: "1500"     # particles >0.3um per 0.1L, typical clean indoor air
+  air_co2_lo: "0"
+  air_co2_hi: "1000"      # ppm — fresh-air comfort threshold
+  air_temp_lo: "18"
+  air_temp_hi: "24"       # °C — indoor comfort
+  air_hum_lo: "30"
+  air_hum_hi: "60"        # % — indoor comfort
+  air_tvoc_lo: "0"
+  air_tvoc_hi: "220"      # ppb — UBA "good" boundary
+  air_h2_lo: "12000"
+  air_h2_hi: "14000"      # SGP30 raw ticks (higher = cleaner air); tune to your unit
+  air_eth_lo: "17000"
+  air_eth_hi: "20000"     # SGP30 raw ticks (higher = cleaner air); tune to your unit
+
 packages:
   # Current weather + 200px condition icon
   weather_today_200: !include
@@ -119,6 +162,168 @@ sensor:
                   id: aqi_so2_value
                   text: !lambda 'return str_sprintf("%.0f", x);'
 
+  # ── Personal air-quality node readings ───────────────────────────────────
+  # Each handler renders "value+unit(lo~hi)" and colors the label green when
+  # the value is inside the good range, red when outside. NaN (entity missing
+  # or unavailable) keeps the previous reading, same as the WAQI handlers.
+  - platform: homeassistant
+    id: air_aqi
+    entity_id: $air_aqi_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_aqi_value),
+                str_sprintf("%.0f(${air_aqi_lo}~${air_aqi_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_aqi_value),
+                (x >= ${air_aqi_lo} && x <= ${air_aqi_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_pm1
+    entity_id: $air_pm1_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_pm1_value),
+                str_sprintf("%.0f(${air_pm1_lo}~${air_pm1_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_pm1_value),
+                (x >= ${air_pm1_lo} && x <= ${air_pm1_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_pm25
+    entity_id: $air_pm25_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_pm25_value),
+                str_sprintf("%.0f(${air_pm25_lo}~${air_pm25_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_pm25_value),
+                (x >= ${air_pm25_lo} && x <= ${air_pm25_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_pm10
+    entity_id: $air_pm10_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_pm10_value),
+                str_sprintf("%.0f(${air_pm10_lo}~${air_pm10_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_pm10_value),
+                (x >= ${air_pm10_lo} && x <= ${air_pm10_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_pm03
+    entity_id: $air_pm03_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_pm03_value),
+                str_sprintf("%.0f(${air_pm03_lo}~${air_pm03_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_pm03_value),
+                (x >= ${air_pm03_lo} && x <= ${air_pm03_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_co2
+    entity_id: $air_co2_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_co2_value),
+                str_sprintf("%.0fppm(${air_co2_lo}~${air_co2_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_co2_value),
+                (x >= ${air_co2_lo} && x <= ${air_co2_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_temp
+    entity_id: $air_temp_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            // The node publishes °F, but HA converts to °C if the entity's
+            // display unit was changed. Room temperature never exceeds 45 in
+            // °C, so treat anything higher as °F and convert.
+            float c = (x > 45.0f) ? (x - 32.0f) * 5.0f / 9.0f : x;
+            lv_label_set_text(id(air_temp_value),
+                str_sprintf("%.1f°C(${air_temp_lo}~${air_temp_hi})", c).c_str());
+            lv_obj_set_style_text_color(id(air_temp_value),
+                (c >= ${air_temp_lo} && c <= ${air_temp_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_hum
+    entity_id: $air_hum_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_hum_value),
+                str_sprintf("%.0f%%(${air_hum_lo}~${air_hum_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_hum_value),
+                (x >= ${air_hum_lo} && x <= ${air_hum_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_tvoc
+    entity_id: $air_tvoc_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_tvoc_value),
+                str_sprintf("%.0fppb(${air_tvoc_lo}~${air_tvoc_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_tvoc_value),
+                (x >= ${air_tvoc_lo} && x <= ${air_tvoc_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_h2
+    entity_id: $air_h2_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_h2_value),
+                str_sprintf("%.0f(${air_h2_lo}~${air_h2_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_h2_value),
+                (x >= ${air_h2_lo} && x <= ${air_h2_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
+  - platform: homeassistant
+    id: air_eth
+    entity_id: $air_eth_entity
+    on_value:
+      then:
+        - lambda: |-
+            if (isnan(x)) return;
+            lv_label_set_text(id(air_eth_value),
+                str_sprintf("%.0f(${air_eth_lo}~${air_eth_hi})", x).c_str());
+            lv_obj_set_style_text_color(id(air_eth_value),
+                (x >= ${air_eth_lo} && x <= ${air_eth_hi})
+                    ? lv_color_hex(0x00E400) : lv_color_hex(0xFF4444),
+                LV_PART_MAIN);
+
 script:
   # Corner date+time on the weather page. `time_update` lives in ui-shared.yaml
   # and is fired by backlight_time.yaml on every time sync and once a minute,
@@ -203,6 +408,21 @@ script:
       flex_align_cross: center
       pad_row: 2
 
+  # One horizontal line inside the air-quality card (transparent, centered)
+  - &air_stat_row
+    width: 100%
+    height: SIZE_CONTENT
+    bg_opa: TRANSP
+    border_width: 0
+    pad_all: 0
+    scrollbar_mode: "OFF"
+    layout:
+      type: flex
+      flex_flow: ROW
+      flex_align_main: center
+      flex_align_cross: center
+      pad_column: 28
+
   # Forecast card labels
   - &forecast_label
     height: SIZE_CONTENT
@@ -214,10 +434,11 @@ lvgl:
     - id: weather_page
       # Explicit grid instead of the 4x4 shorthand: the forecast row (FR 29)
       # gets extra height so the blue low-temperature labels aren't clipped,
-      # and pad_bottom keeps the cards off the screen edge.
+      # the air-quality row (FR 29) holds three lines of readings, and
+      # pad_bottom keeps the cards off the screen edge.
       layout:
         type: grid
-        grid_rows: [FR(24), FR(24), FR(17), FR(29)]
+        grid_rows: [FR(21), FR(21), FR(29), FR(29)]
         grid_columns: [FR(1), FR(1), FR(1), FR(1)]
       pad_bottom: 14
       styles: page_style
@@ -324,70 +545,209 @@ lvgl:
                   src: unknown_200
                   id: weather_condition_icon
 
-        # ── Row 2: AQI pill + pollutant indices, centered ────────────────
+        # ── Row 2: air quality, three lines ──────────────────────────────
+        # Line 1: WAQI internet station — AQI pill + pollutant indices.
+        # Lines 2-3: the personal "ESP32 Air Quality" MQTT node. Each value
+        # shows its good range and is colored by the on_value handlers above
+        # (green = inside range, red = outside).
         - obj:
             <<: *weather_cell
             grid_cell_row_pos: 2
             grid_cell_column_pos: 0
             grid_cell_row_span: 1
             grid_cell_column_span: 4
-            pad_all: 10
+            pad_all: 8
             layout:
               type: flex
-              flex_flow: ROW
-              flex_align_main: center
+              flex_flow: COLUMN
+              flex_align_main: space_evenly
               flex_align_cross: center
-              pad_column: 40
+              pad_row: 2
             widgets:
-              - !include
-                  file: esphome-modular-lvgl-buttons/ui/weather/aqi_pill_widget.yaml
-                  vars:
-                    aqi_label_font: nunito_20
-                    aqi_value_font: nunito_36
+              # Line 1 — internet station (unchanged behavior)
               - obj:
-                  <<: *aqi_stat_cell
+                  <<: *air_stat_row
                   widgets:
+                    - !include
+                        file: esphome-modular-lvgl-buttons/ui/weather/aqi_pill_widget.yaml
+                        vars:
+                          aqi_label_font: nunito_20
+                          aqi_value_font: nunito_36
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "NO2"
+                          - label:
+                              <<: *weather_value
+                              id: aqi_no2_value
+                              text_font: nunito_36
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "O3"
+                          - label:
+                              <<: *weather_value
+                              id: aqi_o3_value
+                              text_font: nunito_36
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "SO2"
+                          - label:
+                              <<: *weather_value
+                              id: aqi_so2_value
+                              text_font: nunito_36
+                              text: "--"
+                    # Text summary — no summary sensor is configured (see the
+                    # weather_summary var above), so this stays hidden. If you
+                    # add a real summary sensor, remove `hidden` and give this
+                    # label `flex_grow: 1` (and switch flex_align_main to start).
                     - label:
-                        <<: *weather_caption
-                        text: "NO2"
-                    - label:
-                        <<: *weather_value
-                        id: aqi_no2_value
-                        text_font: nunito_36
-                        text: "--"
+                        id: weather_summary_today
+                        hidden: true
+                        text: ""
+                        text_font: nunito_24
+                        text_color: $label_on_color
+                        text_align: LEFT
+
+              # Line 2 — personal node: AQI + particulates + CO2
               - obj:
-                  <<: *aqi_stat_cell
+                  <<: *air_stat_row
                   widgets:
-                    - label:
-                        <<: *weather_caption
-                        text: "O3"
-                    - label:
-                        <<: *weather_value
-                        id: aqi_o3_value
-                        text_font: nunito_36
-                        text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "AQI"
+                          - label:
+                              <<: *weather_value
+                              id: air_aqi_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "PM1"
+                          - label:
+                              <<: *weather_value
+                              id: air_pm1_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "PM2.5"
+                          - label:
+                              <<: *weather_value
+                              id: air_pm25_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "PM10"
+                          - label:
+                              <<: *weather_value
+                              id: air_pm10_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "PM0.3"
+                          - label:
+                              <<: *weather_value
+                              id: air_pm03_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "CO2"
+                          - label:
+                              <<: *weather_value
+                              id: air_co2_value
+                              text_font: nunito_24
+                              text: "--"
+
+              # Line 3 — personal node: environment + gas signals
               - obj:
-                  <<: *aqi_stat_cell
+                  <<: *air_stat_row
                   widgets:
-                    - label:
-                        <<: *weather_caption
-                        text: "SO2"
-                    - label:
-                        <<: *weather_value
-                        id: aqi_so2_value
-                        text_font: nunito_36
-                        text: "--"
-              # Text summary — no summary sensor is configured (see the
-              # weather_summary var above), so this stays hidden. If you add
-              # a real summary sensor, remove `hidden` and give this label
-              # `flex_grow: 1` (and switch flex_align_main back to start).
-              - label:
-                  id: weather_summary_today
-                  hidden: true
-                  text: ""
-                  text_font: nunito_24
-                  text_color: $label_on_color
-                  text_align: LEFT
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "Temp"
+                          - label:
+                              <<: *weather_value
+                              id: air_temp_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "Humidity"
+                          - label:
+                              <<: *weather_value
+                              id: air_hum_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "TVOC"
+                          - label:
+                              <<: *weather_value
+                              id: air_tvoc_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "H2"
+                          - label:
+                              <<: *weather_value
+                              id: air_h2_value
+                              text_font: nunito_24
+                              text: "--"
+                    - obj:
+                        <<: *aqi_stat_cell
+                        widgets:
+                          - label:
+                              <<: *weather_caption
+                              text: "Ethanol"
+                          - label:
+                              <<: *weather_value
+                              id: air_eth_value
+                              text_font: nunito_24
+                              text: "--"
 
         # ── Row 3: 4-day forecast cards ──────────────────────────────────
         - obj:
