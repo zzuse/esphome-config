@@ -26,6 +26,12 @@ substitutions:
   # defaults for popup pages
   popup_timeout_seconds: '120'  # timeout in seconds
 
+  # Kids-photo screensaver — see photo-page.yaml. URL must point at the
+  # machine running the photo-server container from docker-compose.yml.
+  photo_server_url: "http://10.0.0.24:8128/photo"
+  photo_idle_timeout_s: "300"      # 5 min of no touching → slideshow starts
+  photo_slideshow_interval: 20s    # time each photo stays on screen
+
 esphome:
   name: "waveshare-p4-lcd-10-1"
   friendly_name: "Waveshare ESP32-P4 WiFi6 Touch LCD 10.1"
@@ -64,6 +70,9 @@ packages:
   sensors: !include esphome-modular-lvgl-buttons/common/sensors_base.yaml
   # Include if your touch screen has a backlight. Also sets the time from HA
   backlight: !include esphome-modular-lvgl-buttons/common/backlight_time.yaml
+
+  # Kids-photo screensaver page (shows up on idle, tap to dismiss)
+  photo_page: !include photo-page.yaml
 
   # Hardware description file for 10.1" display
   hardware: !include

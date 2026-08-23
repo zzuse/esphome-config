@@ -1,0 +1,134 @@
+# Kids-photo screensaver page.
+#
+# A full-screen page that behaves like a photo-frame screensaver: after the
+# touchscreen has been idle for ${photo_idle_timeout_s} seconds it appears on
+# its own, cycles through random photos every ${photo_slideshow_interval}, and
+# a single tap anywhere returns to the main page.
+#
+# Photos are fetched over HTTP from photo-server/ (see that directory and
+# docker-compose.yml): a tiny container that picks a random file from your
+# photo library (NAS mount or local folder), fixes the EXIF rotation, resizes
+# it to fit the 1280x800 screen, and returns it as a JPEG. Every request to
+# the same URL returns a different photo, so the panel just re-downloads
+# ${photo_server_url} whenever it wants the next one.
+#
+# Idle detection deliberately does NOT use `lvgl: on_idle:` — the backlight
+# package (common/backlight_time.yaml) already defines that trigger as a
+# single mapping, and a second definition here would merge over it and break
+# the night-time screen blanking. Instead an `interval:` polls LVGL's own
+# touch-inactivity clock (lv_disp_get_inactive_time), which the backlight
+# logic never touches.
+#
+# Override these in the device file's top-level substitutions (device file
+# wins over package defaults — see the note in ui-shared.yaml).
+substitutions:
+  # URL that returns a random JPEG on every request — point at the machine
+  # running photo-server (docker-compose.yml).
+  photo_server_url: "http://10.0.0.30:8128/photo"
+  photo_idle_timeout_s: "300" # seconds of no touching before the slideshow starts
+  photo_slideshow_interval: 20s # how long each photo stays up
+
+globals:
+  - id: photo_mode
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+# The 1280x800 RGB565 frame lives in PSRAM (~2MB of the board's 32MB).
+# http_request comes from the hardware include, so it isn't declared here.
+image:
+  - platform: online_image
+    id: kids_photo
+    url: ${photo_server_url}
+    format: JPEG
+    type: RGB565
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: photo_img
+          src: kids_photo
+    on_error:
+      - logger.log:
+          level: WARN
+          format: "Kids photo download failed — is photo-server running?"
+
+interval:
+  # Idle watchdog: start the slideshow after ${photo_idle_timeout_s}s without
+  # touch input. Skipped while LVGL is paused (night-mode screen blank).
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            and:
+              - not:
+                  lvgl.is_paused:
+              - lambda: |-
+                  return !id(photo_mode) &&
+                         lv_disp_get_inactive_time(NULL) >
+                             (uint32_t) ${photo_idle_timeout_s} * 1000UL;
+          then:
+            - lvgl.page.show:
+                id: photo_page
+                animation: FADE_IN
+                time: 500ms
+            - component.update: kids_photo
+  # Slideshow: fetch the next photo while the page is showing.
+  - interval: ${photo_slideshow_interval}
+    then:
+      - if:
+          condition:
+            lambda: "return id(photo_mode);"
+          then:
+            - component.update: kids_photo
+
+lvgl:
+  pages:
+    - id: photo_page
+      skip: true # keep it out of the swipe-left/right page rotation
+      bg_color: 0x000000
+      bg_opa: COVER
+      pad_all: 0
+      on_load:
+        - lambda: "id(photo_mode) = true;"
+        - script.execute: time_update # clock is fresh immediately, not after up to 1 min
+      on_unload:
+        - lambda: "id(photo_mode) = false;"
+      widgets:
+        - image:
+            id: photo_img
+            src: kids_photo
+            align: center
+        # Small clock in the corner so the panel is still useful as a glance clock.
+        - label:
+            id: photo_clock
+            text_font: $text_font
+            text_color: white
+            opa: 60%
+            align: bottom_right
+            x: -14
+            y: -10
+            text: ""
+        # Invisible full-screen touch layer: tap anywhere to go back.
+        - obj:
+            width: 100%
+            height: 100%
+            bg_opa: TRANSP
+            border_width: 0
+            radius: 0
+            on_press:
+              - lvgl.page.show:
+                  id: main_page
+                  animation: FADE_IN
+                  time: 300ms
+
+script:
+  - id: !extend time_update
+    then:
+      - lambda: |-
+          auto now = id(system_time).now();
+          if (!now.is_valid()) return;
+          int hour12 = now.hour % 12;
+          if (hour12 == 0) hour12 = 12;
+          lv_label_set_text(id(photo_clock),
+              str_sprintf("%d:%02d %s", hour12, now.minute,
+                          now.hour < 12 ? "am" : "pm").c_str());

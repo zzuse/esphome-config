@@ -13,8 +13,10 @@ library, pulled in here as a git submodule.
 | `ui-shared.yaml` | Shared includes/config used by both `my-panel.yaml` and `sim.yaml` |
 | `secrets.yaml` | Local secrets (wifi, coordinates) — gitignored, not in the repo |
 | `secrets.yaml.example` | Template for `secrets.yaml` |
+| `photo-page.yaml` | Kids-photo screensaver page (auto-shows on idle, tap to dismiss) |
+| `photo-server/` | Container that serves random panel-sized JPEGs from a photo folder |
 | `esphome-modular-lvgl-buttons/` | Submodule: the UI component library (own repo/history) |
-| `docker-compose.yml` | start speech to text service `docker compose up -d` |
+| `docker-compose.yml` | speech-to-text + photo services, `docker compose up -d` |
 
 ## Clone
 
@@ -89,6 +91,26 @@ esphome run sim.yaml           # run the SDL simulator locally
 esphome config sim.yaml > /tmp/sim.txt  # test config
 esphome run sim-weather-shot.yaml # weather SDL simulator page
 curl http://localhost:8080/screenshot > shot.png
+```
+
+## Kids-photo screensaver
+
+`photo-page.yaml` adds a photo-frame page: after 5 minutes without touch input the panel
+fades into a slideshow of random photos (a new one every 20 s); tapping anywhere returns
+to the main page. The page is skipped by swipe navigation — it only appears on idle.
+Timings and the server URL are substitutions at the top of `my-panel.yaml`.
+
+Photos come from the `kids-photos` service in `docker-compose.yml` — a tiny HTTP server
+(`photo-server/`) that returns a random image from a folder, EXIF-rotated and resized to
+fit the 1280x800 screen (HEIC/iPhone photos supported). Point its volume at your photo
+library — a local `./photos` folder, an SMB/NFS mount of the NAS share, or run the
+compose file on the NAS itself — then set `photo_server_url` in `my-panel.yaml` to that
+machine's IP:
+
+```bash
+docker compose up -d kids-photos
+curl http://localhost:8128/health   # → "N photos"
+curl -o test.jpg http://localhost:8128/photo
 ```
 
 ## Further docs

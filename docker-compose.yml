@@ -17,3 +17,20 @@ services:
     volumes:
       - ./piper-data:/data
     restart: unless-stopped
+
+  # Random-photo server for the panel's kids-photo screensaver (photo-page.yaml).
+  # GET :8128/photo returns a random, panel-sized JPEG from the mounted folder.
+  kids-photos:
+    build: ./photo-server
+    ports:
+      - "8128:8128"
+    volumes:
+      # Point this at your photo library: a local folder, or an SMB/NFS mount
+      # of the NAS share (or run this compose file on the NAS itself).
+      - ./photos:/photos:ro
+    environment:
+      WIDTH: "1280" # panel resolution (landscape)
+      HEIGHT: "800"
+      QUALITY: "85"
+      RESCAN_SECONDS: "600" # how often to re-scan the folder for new photos
+    restart: unless-stopped
