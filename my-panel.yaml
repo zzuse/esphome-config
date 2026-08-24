@@ -26,11 +26,7 @@ substitutions:
   # defaults for popup pages
   popup_timeout_seconds: '120'  # timeout in seconds
 
-  # Kids-photo screensaver — see photo-page.yaml. URL must point at the
-  # machine running the photo-server container from docker-compose.yml.
-  photo_server_url: "http://10.0.0.24:8128/photo"
-  photo_idle_timeout_s: "300"      # 5 min of no touching → slideshow starts
-  photo_slideshow_interval: 20s    # time each photo stays on screen
+  # Kids-photo screensaver: server URL and timings are set in photo-page.yaml.
 
 esphome:
   name: "waveshare-p4-lcd-10-1"

@@ -19,14 +19,15 @@
 # touch-inactivity clock (lv_disp_get_inactive_time), which the backlight
 # logic never touches.
 #
-# Override these in the device file's top-level substitutions (device file
-# wins over package defaults — see the note in ui-shared.yaml).
+# These are the live settings — edit them here. (A device file could still
+# override them from its own top-level substitutions, but my-panel.yaml
+# deliberately doesn't, so there's only one place to edit.)
 substitutions:
   # URL that returns a random JPEG on every request — point at the machine
   # running photo-server (docker-compose.yml).
   photo_server_url: "http://10.0.0.30:8128/photo"
   photo_idle_timeout_s: "300" # seconds of no touching before the slideshow starts
-  photo_slideshow_interval: 20s # how long each photo stays up
+  photo_slideshow_interval: 15s # how long each photo stays up
 
 globals:
   - id: photo_mode
