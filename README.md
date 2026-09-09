@@ -14,6 +14,8 @@ library, pulled in here as a git submodule.
 | `secrets.yaml` | Local secrets (wifi, coordinates) — gitignored, not in the repo |
 | `secrets.yaml.example` | Template for `secrets.yaml` |
 | `photo-page.yaml` | Kids-photo screensaver page (auto-shows on idle, tap to dismiss) |
+| `led-sensor.yaml` | Standalone presence-sensor node (YD-ESP32-S3 + LD2410 radar), drives an LED strip |
+| `desk-lamp.yaml` | Standalone CWWW desk lamp node (ESP32-S3 + AS7341), matches the room's light |
 | `photo-server/` | Container that serves random panel-sized JPEGs from a photo folder |
 | `esphome-modular-lvgl-buttons/` | Submodule: the UI component library (own repo/history) |
 | `docker-compose.yml` | speech-to-text + photo services, `docker compose up -d` |
@@ -171,6 +173,82 @@ For NFS the equivalent is `showmount -e 10.0.0.133` to list exports, then:
 
 ```
 10.0.0.133:/volume1/photo  /home/zzuse/code/esphome-config/photos  nfs  ro,_netdev,nofail,x-systemd.automount  0  0
+```
+
+## LED presence sensor
+
+`led-sensor.yaml` is a separate, headless device — a YD-ESP32-S3 dev board (ESP32-S3-N16R8:
+16 MB flash, 8 MB octal PSRAM) with an LD2410 mmWave radar. It shares the panel's
+`secrets.yaml` and wifi include but is otherwise independent. (The AS7341 spectral sensor
+used to live here; it moved to `desk-lamp.yaml` along with the light it now drives.)
+
+Wiring:
+
+| Signal | Pin |
+|---|---|
+| LD2410 TX → board RX | GPIO17 |
+| LD2410 RX ← board TX | GPIO18 |
+| LED strip enable (via MOSFET/relay) | GPIO16 |
+| Onboard WS2812 (close the "RGB" solder jumper if open) | GPIO48 |
+
+Presence logic runs entirely on-device, so it keeps working with Home Assistant offline:
+
+- **Person detected** → the accent strip on GPIO16 switches on and the onboard LED lights
+  dim blue.
+- **Room clears** → the LED goes out immediately; the strip stays on for another 30 s.
+  The countdown lives in a `mode: restart` script, so coming back within those 30 s
+  cancels it instead of cutting the strip off mid-stay.
+
+Everything is also exposed to HA: presence/moving/still binary sensors, target distances,
+the strip switch, and the onboard LED as a normal light.
+
+```bash
+esphome run led-sensor.yaml                              # first flash over USB
+esphome logs led-sensor.yaml --device led-sensor.local   # watch logs / OTA afterwards
+```
+
+## Desk lamp
+
+`desk-lamp.yaml` is another standalone node: a cold-white/warm-white LED strip on an
+ESP32-S3, plus the AS7341 spectral sensor that used to sit on the presence node. Both ends
+of the loop live on one board, so the lamp keeps tracking the room with Home Assistant
+offline.
+
+Wiring:
+
+| Signal | Pin |
+|---|---|
+| Cold-white channel (via MOSFET) | GPIO4 |
+| Warm-white channel (via MOSFET) | GPIO5 |
+| I2C SDA / SCL (AS7341, addr 0x39) | GPIO8 / GPIO9 |
+
+The two channels are LEDC PWM at 19.5 kHz, combined by the `cwww` light platform into one
+"Desk lamp" entity with a 2700–6500 K color-temperature slider. `constant_brightness: true`
+holds total output flat as the mix slides, so changing warmth doesn't change how bright the
+lamp looks.
+
+**Auto adjust** (a switch, default on) makes the lamp follow the room every 30 s, while the
+lamp is on — it never switches the lamp on by itself, and turning the switch off hands
+control back to HA for good:
+
+- **Brightness** tracks the AS7341 clear channel on a sqrt curve, floored at 15 %, so a dim
+  room dims the lamp instead of killing it.
+- **Color temperature** tracks the 415 nm / 680 nm ratio — low under tungsten, high under
+  daylight — interpolated in mireds and published as the "Ambient Color Temperature" sensor
+  for calibration.
+
+Tuning lives in `substitutions:` at the top of the file: `ambient_full` (the clear count
+that counts as a fully lit room), `min_brightness`, and the `ratio_warm` / `ratio_cool`
+ends of the color ramp. Watch the sensors in HA for a day, then set them.
+
+Point the AS7341 at the room or a window, **not** at the lamp — it can't tell the lamp's
+own output from ambient light, and a sensor staring into the strip it drives will chase
+itself. A 3-sample moving average, the 30 s interval, and a deadband on the light call damp
+that, but placement is the real fix.
+
+```bash
+esphome run desk-lamp.yaml                             # first flash over USB
+esphome logs desk-lamp.yaml --device desk-lamp.local   # watch logs / OTA afterwards
 ```
 
 ## Further docs

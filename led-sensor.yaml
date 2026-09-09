@@ -1,0 +1,187 @@
+---
+# LD2410 mmWave presence sensor on a YD-ESP32-S3 (VCC-GND) dev board.
+#
+# Board is the "N16R8" variant: 16 MB flash + 8 MB octal PSRAM. There is no
+# dedicated PlatformIO board for it, so we use esp32-s3-devkitc-1 (same
+# pinout) and override the flash size explicitly — the devkitc-1 default is
+# 8 MB and flashing with that would work but waste half the chip.
+#
+# Wiring:
+#   LD2410 TX -> GPIO17 (rx_pin), LD2410 RX -> GPIO18 (tx_pin)
+#   LED strip enable line (MOSFET/relay) on GPIO16
+#   Onboard WS2812 RGB LED on GPIO48 (close the "RGB" solder jumper if open)
+
+esphome:
+  name: "led-sensor"
+  friendly_name: "LED Presence Sensor"
+  comment: "YD-ESP32-S3 N16R8 with LD2410 mmWave radar"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+# N16R8 = octal PSRAM. Not required for this config, but declaring it makes
+# the 8 MB available if fonts/images/voice get added later.
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+packages:
+  # Wi-Fi credentials from secrets.yaml, plus captive portal and web server.
+  wifi: !include esphome-modular-lvgl-buttons/common/wifi.yaml
+
+uart:
+  tx_pin: GPIO18
+  rx_pin: GPIO17
+  baud_rate: 256000
+  parity: NONE
+  stop_bits: 1
+
+ld2410:
+
+# LED strip enable line on GPIO16 (via MOSFET/relay — plain on/off output).
+switch:
+  - platform: gpio
+    pin: GPIO16
+    id: car_strip
+    name: "Accent strip"
+
+# Strip stays on for 30 s after the room clears. mode: restart means a fresh
+# release restarts the countdown, and on_press cancels it entirely — without
+# this, leaving and returning within 30 s would cut the strip off mid-stay.
+script:
+  - id: strip_off_delayed
+    mode: restart
+    then:
+      - delay: 30s
+      - switch.turn_off: car_strip
+
+binary_sensor:
+  - platform: ld2410
+    has_target:
+      name: "Presence"
+      id: presence
+      # Drive the onboard LED and accent strip from presence directly
+      # on-device, so it works even with HA offline.
+      on_press:
+        - script.stop: strip_off_delayed
+        - switch.turn_on: car_strip
+        - light.turn_on:
+            id: onboard_led
+            brightness: 40%
+            red: 0%
+            green: 0%
+            blue: 40%
+      on_release:
+        - script.execute: strip_off_delayed
+        - light.turn_off: onboard_led
+    has_moving_target:
+      name: "Moving Target"
+    has_still_target:
+      name: "Still Target"
+
+sensor:
+  - platform: ld2410
+    detection_distance:
+      name: "Detection Distance"
+    moving_distance:
+      name: "Moving Distance"
+    still_distance:
+      name: "Still Distance"
+
+# Radar firmware version — distance_resolution below needs LD2410 firmware
+# 2.04 or newer; check this entity in HA if the select has no effect.
+text_sensor:
+  - platform: ld2410
+    version:
+      name: "Radar Firmware"
+
+# Gate resolution: 0.75m (default, ~6 m range) or 0.2m (~1.8 m range).
+# Stored in the radar module's own flash, so it survives ESP reboots.
+select:
+  - platform: ld2410
+    distance_resolution:
+      name: "Distance Resolution"
+
+# Coverage tuning. Since ESPHome 2023.4 these are number entities (sliders in
+# HA) rather than fixed YAML keys. Values are written to the radar module's
+# flash, so set them once from HA and they persist.
+#   max_*_distance_gate: last gate that counts (0-8), i.e. detection range.
+#   timeout: how long presence is held after the last detection.
+#   gN thresholds (0-100): energy needed for that gate to trigger; higher =
+#   less sensitive. still_threshold 0 disables still detection for the gate.
+number:
+  - platform: ld2410
+    max_move_distance_gate:
+      name: "Max Move Gate"
+    max_still_distance_gate:
+      name: "Max Still Gate"
+    timeout:
+      name: "Presence Timeout"
+    g0:
+      move_threshold:
+        name: "G0 Move Threshold"
+      still_threshold:
+        name: "G0 Still Threshold"
+    g1:
+      move_threshold:
+        name: "G1 Move Threshold"
+      still_threshold:
+        name: "G1 Still Threshold"
+    g2:
+      move_threshold:
+        name: "G2 Move Threshold"
+      still_threshold:
+        name: "G2 Still Threshold"
+    g3:
+      move_threshold:
+        name: "G3 Move Threshold"
+      still_threshold:
+        name: "G3 Still Threshold"
+    g4:
+      move_threshold:
+        name: "G4 Move Threshold"
+      still_threshold:
+        name: "G4 Still Threshold"
+    g5:
+      move_threshold:
+        name: "G5 Move Threshold"
+      still_threshold:
+        name: "G5 Still Threshold"
+    g6:
+      move_threshold:
+        name: "G6 Move Threshold"
+      still_threshold:
+        name: "G6 Still Threshold"
+    g7:
+      move_threshold:
+        name: "G7 Move Threshold"
+      still_threshold:
+        name: "G7 Still Threshold"
+    g8:
+      move_threshold:
+        name: "G8 Move Threshold"
+      still_threshold:
+        name: "G8 Still Threshold"
+
+# Onboard WS2812 on GPIO48 — lit green by the Presence sensor above, and
+# still controllable from HA as a normal light.
+light:
+  - platform: esp32_rmt_led_strip
+    id: onboard_led
+    name: "Onboard LED"
+    pin: GPIO48
+    num_leds: 1
+    chipset: WS2812
+    rgb_order: GRB
+    restore_mode: ALWAYS_OFF

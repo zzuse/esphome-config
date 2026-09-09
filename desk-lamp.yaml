@@ -1,0 +1,211 @@
+---
+# Desk lamp: a dual-channel (cold white + warm white) LED strip driven by an
+# ESP32-S3, with an AS7341 spectral sensor so the lamp can follow the room's
+# own light instead of sitting at whatever was last set.
+#
+# The AS7341 used to hang off led-sensor.yaml's I2C bus. It lives here now, on
+# the same board as the light it controls, so the whole loop runs on-device and
+# keeps working with Home Assistant offline.
+#
+# Wiring:
+#   I2C bus on GPIO8 (SDA) / GPIO9 (SCL): AS7341 spectral sensor at 0x39
+#   Cold-white channel -> GPIO4, warm-white channel -> GPIO5, both via a
+#   logic-level MOSFET (the ESP pins switch the gate, not the LED current).
+#
+# Point the AS7341 at the room or a window, NOT at the lamp. It cannot tell
+# the lamp's own output from ambient light, so a sensor staring into the strip
+# it drives will chase itself. The deadband and the slow update interval below
+# damp that, but placement is the real fix.
+
+substitutions:
+  cw_pin: GPIO4
+  ww_pin: GPIO5
+  sda_pin: GPIO8
+  scl_pin: GPIO9
+
+  # Auto-mode tuning. These are pasted into the lambda below verbatim, so they
+  # must stay plain numbers.
+  #
+  # ambient_full: clear-channel count that counts as a fully lit room, i.e. the
+  #   top of the brightness ramp. Watch the "Ambient Clear" sensor in HA on a
+  #   bright afternoon and put that number here.
+  ambient_full: "8000"
+  # Floor for auto mode, so a dark room dims the lamp rather than killing it.
+  min_brightness: "0.15"
+  # Blue-over-red ratios that bracket the color-temperature ramp: tungsten /
+  # evening light at the warm end, overcast daylight at the cool end.
+  ratio_warm: "0.25"
+  ratio_cool: "1.00"
+
+esphome:
+  name: "desk-lamp"
+  friendly_name: "Desk Lamp"
+  comment: "ESP32-S3 CWWW desk lamp with AS7341 ambient matching"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+packages:
+  # Wi-Fi credentials from secrets.yaml, plus captive portal and web server.
+  wifi: !include esphome-modular-lvgl-buttons/common/wifi.yaml
+
+i2c:
+  sda: ${sda_pin}
+  scl: ${scl_pin}
+  scan: true
+
+# LEDC PWM at ~19.5 kHz: well above anything the eye or a phone camera picks
+# up, and the frequency ESP32 LEDC can still resolve finely enough to dim
+# smoothly at the bottom of the range.
+output:
+  - platform: ledc
+    id: cw_out
+    pin: ${cw_pin}
+    frequency: 19531 Hz
+  - platform: ledc
+    id: ww_out
+    pin: ${ww_pin}
+    frequency: 19531 Hz
+
+# constant_brightness keeps total output flat as the mix slides between the two
+# channels, so changing color temperature does not change apparent brightness.
+light:
+  - platform: cwww
+    id: desk_lamp
+    name: "Desk lamp"
+    cold_white: cw_out
+    warm_white: ww_out
+    cold_white_color_temperature: 6500 K
+    warm_white_color_temperature: 2700 K
+    constant_brightness: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    default_transition_length: 1s
+
+sensor:
+  # AS7341 11-channel spectral color sensor on the I2C bus (address 0x39).
+  #
+  # gain X16 rather than the X128 this sensor ran at on the presence node: here
+  # it reads a lit room, not a dim corner, and X128 pins the clear channel at
+  # full scale in daylight — which would flatten the top of both ramps.
+  # 30 s updates keep the auto-adjust loop from reacting to someone walking
+  # past the sensor.
+  - platform: as7341
+    gain: X16
+    atime: 100
+    astep: 999
+    update_interval: 30s
+    f1:
+      name: "415nm"
+      id: as7341_f1
+      # Three-sample average: one shadow crossing the sensor should not move
+      # the lamp, and smoothing here is cheaper than hysteresis downstream.
+      filters:
+        - sliding_window_moving_average:
+            window_size: 3
+            send_every: 1
+    f8:
+      name: "680nm"
+      id: as7341_f8
+      filters:
+        - sliding_window_moving_average:
+            window_size: 3
+            send_every: 1
+    clear:
+      name: "Ambient Clear"
+      id: as7341_clear
+      filters:
+        - sliding_window_moving_average:
+            window_size: 3
+            send_every: 1
+      # The component publishes f1..f8 before clear, so by the time this fires
+      # the other two channels already hold this cycle's readings.
+      on_value:
+        - script.execute: match_ambient
+    nir:
+      name: "NIR"
+
+  # What auto mode computed the room to be, in kelvin. Not used by the logic —
+  # it is here so the ratio_warm / ratio_cool substitutions can be calibrated
+  # against something visible.
+  - platform: template
+    id: ambient_cct
+    name: "Ambient Color Temperature"
+    unit_of_measurement: "K"
+    icon: mdi:temperature-kelvin
+    accuracy_decimals: 0
+    state_class: measurement
+
+# Auto mode is a switch, not a hardcoded behaviour: grabbing the lamp from HA
+# or the web server should win, and this is how you stop it being overwritten
+# 30 s later.
+switch:
+  - platform: template
+    id: auto_adjust
+    name: "Auto Adjust"
+    icon: mdi:theme-light-dark
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      # Don't make the user wait out an update interval for the first match.
+      - script.execute: match_ambient
+
+script:
+  - id: match_ambient
+    mode: restart
+    then:
+      - lambda: |-
+          if (!id(auto_adjust).state)
+            return;
+          // Auto mode shapes the light while it is on; it never switches the
+          // lamp on by itself.
+          if (!id(desk_lamp).remote_values.is_on())
+            return;
+
+          const float clear = id(as7341_clear).state;
+          const float blue = id(as7341_f1).state;
+          const float red = id(as7341_f8).state;
+          if (isnan(clear) || isnan(blue) || isnan(red))
+            return;
+
+          // Brightness follows the room's level. sqrt puts most of the travel
+          // at the dim end, where the eye notices a change of a few percent.
+          const float amb = clamp(clear / (float) ${ambient_full}, 0.0f, 1.0f);
+          const float floor_b = (float) ${min_brightness};
+          const float brightness = clamp(floor_b + (1.0f - floor_b) * sqrtf(amb), 0.0f, 1.0f);
+
+          // Color temperature follows the room's spectrum: 415 nm over 680 nm
+          // is low under tungsten and high under daylight. Interpolate in
+          // mireds, which is both the perceptually even axis and the unit
+          // set_color_temperature() wants.
+          const float ratio = blue / (red > 1.0f ? red : 1.0f);
+          const float t = clamp((ratio - (float) ${ratio_warm}) /
+                                ((float) ${ratio_cool} - (float) ${ratio_warm}), 0.0f, 1.0f);
+          const float warm_mired = 1000000.0f / 2700.0f;
+          const float cool_mired = 1000000.0f / 6500.0f;
+          const float mireds = warm_mired + t * (cool_mired - warm_mired);
+
+          id(ambient_cct).publish_state(1000000.0f / mireds);
+
+          // Deadband. The sensor can see this lamp, so applying every tiny
+          // correction would feed straight back into the next reading and hunt.
+          if (fabsf(brightness - id(desk_lamp).remote_values.get_brightness()) < 0.03f &&
+              fabsf(mireds - id(desk_lamp).remote_values.get_color_temperature()) < 8.0f)
+            return;
+
+          auto call = id(desk_lamp).make_call();
+          call.set_brightness(brightness);
+          call.set_color_temperature(mireds);
+          // Long fade: this runs unprompted, so it should read as the room
+          // changing rather than as the lamp being switched.
+          call.set_transition_length(3000);
+          call.perform();
