@@ -200,7 +200,58 @@ Presence logic runs entirely on-device, so it keeps working with Home Assistant 
   cancels it instead of cutting the strip off mid-stay.
 
 Everything is also exposed to HA: presence/moving/still binary sensors, target distances,
-the strip switch, and the onboard LED as a normal light.
+the strip switch, the onboard LED as a normal light, and — for tuning — an Engineering Mode
+switch, per-gate energy sensors, the gate threshold sliders, and Factory Reset / Radar
+Restart / Query Params buttons.
+
+### Placement and aiming
+
+The LD2410 is a Doppler radar: it sees **radial** motion, toward or away from the module,
+and is close to blind to movement straight across its field. That one fact decides where to
+point it.
+
+- **Aim the boresight along the path people approach from.** Someone walking toward the
+  sensor registers strongly at modest sensitivity; the same person crossing left-to-right at
+  the same distance may barely register at all.
+- **Put whatever you want ignored off-axis.** Sensitivity peaks on the boresight and falls
+  off toward the edges of the ~60° cone, so foliage, a curtain over an air vent, or a
+  walkway that isn't yours belongs at the beam edge — where it is both least visible and
+  moving tangentially. This costs nothing and works better than raising thresholds.
+- **Mounted high, tilt it down** so the cone covers people instead of the far wall. Check
+  that the tilt doesn't swing the boresight straight into whatever you just arranged to keep
+  off-axis — that trade is easy to make by accident.
+
+Notes on things that bite:
+
+- **Never coil the LED strip wiring around the sensor.** The strip's switching currents
+  couple into the radar's front end through the near field, and a loop of wire over the
+  module is an antenna pointed straight at it. Coiled wiring here pinned *every* gate at
+  100 % energy — the radar stopped resolving range at all and tripped on anything. Straight
+  wiring routed ~10 cm clear dropped the idle floor to ~5 %. Near-field coupling falls off
+  roughly with the cube of distance, so a few centimetres of routing is worth more than any
+  amount of threshold tuning. Twisting the strip's + and − leads together helps further.
+- **Keep metal out of the first few centimetres in front of the antenna.** A close
+  reflector saturates the receiver, with the same all-gates-maxed result.
+- **Radar sees through thin plastic.** An enclosure won't shield it; only aiming and
+  distance will.
+
+### Tuning
+
+Turn on the **Engineering Mode** switch and the per-gate energy sensors start reporting.
+Gates are 0.75 m each by default, so G0 covers 0–0.75 m, G1 0.75–1.5 m, and so on. With the
+area empty, every gate should read single digits — if they sit near 100, something is
+saturating the receiver and no threshold will help until you fix it (see above).
+
+Measure with **nobody present**: standing there to read the values pins the gates you are
+standing in. Put the energy sensors on a history graph, leave for five minutes, then read
+the graph for the period you were gone.
+
+The nearest gates report 0 still energy by design — the radar does no static detection that
+close — so don't read those zeros as a fault. Once you have a clean baseline, set a gate's
+move threshold above the peak energy that false-triggers it. If a calibration goes wrong,
+the **Factory Reset** button restores the module's own defaults and re-reads them into the
+HA sliders, which beats retyping eighteen values. Turn Engineering Mode back off when done —
+it roughly doubles the UART traffic and the energy sensors go unavailable outside it anyway.
 
 ```bash
 esphome run led-sensor.yaml                              # first flash over USB

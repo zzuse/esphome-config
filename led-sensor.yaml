@@ -10,6 +10,13 @@
 #   LD2410 TX -> GPIO17 (rx_pin), LD2410 RX -> GPIO18 (tx_pin)
 #   LED strip enable line (MOSFET/relay) on GPIO16
 #   Onboard WS2812 RGB LED on GPIO48 (close the "RGB" solder jumper if open)
+#
+# Cable routing is not optional here. The strip's switching currents couple
+# into the radar's front end through the near field, and coiling the strip
+# wiring around the sensor saturated every gate at 100% energy — the radar
+# stopped resolving range entirely and tripped on anything. Straightening the
+# run to ~10 cm clear of the module dropped the idle floor to ~5%. Keep the
+# strip leads straight, away from the module, and never looped around it.
 
 esphome:
   name: "led-sensor"
@@ -30,6 +37,13 @@ psram:
   speed: 80MHz
 
 logger:
+  # Uncomment to dump every raw radar frame as hex. Frames are only logged
+  # after the header/footer check passes, so anything that appears here is
+  # well-formed data straight off the UART — useful for telling "the radar
+  # really is reporting this" apart from "we are misparsing the stream".
+  # level: VERBOSE
+  # logs:
+  #   ld2410: VERBOSE
 
 api:
 
@@ -56,9 +70,21 @@ switch:
     id: car_strip
     name: "Accent strip"
 
+  # Engineering mode makes the radar stream per-gate energy (the gN sensors
+  # further down). Turn it on from HA while tuning thresholds, off afterwards
+  # — it roughly doubles the UART traffic for no benefit in normal use.
+  - platform: ld2410
+    engineering_mode:
+      name: "Engineering Mode"
+
 # Strip stays on for 30 s after the room clears. mode: restart means a fresh
 # release restarts the countdown, and on_press cancels it entirely — without
 # this, leaving and returning within 30 s would cut the strip off mid-stay.
+#
+# Three timers stack on the off path: the radar's own absence delay (the
+# "Presence Timeout" number, default 5 s) + the delayed_off filter + this
+# script. Keep the filter short and do the holding here, or the strip lingers
+# for over a minute.
 script:
   - id: strip_off_delayed
     mode: restart
@@ -71,6 +97,13 @@ binary_sensor:
     has_target:
       name: "Presence"
       id: presence
+      # Wind-driven foliage gives short, jittery hits. delayed_on: 2s means
+      # the radar has to stay tripped for 2 s straight before we believe it,
+      # which kills isolated gusts. delayed_off is only a debounce here (5 s);
+      # the real hold is strip_off_delayed below — see the note on stacking.
+      filters:
+        - delayed_on: 2s
+        - delayed_off: 5s
       # Drive the onboard LED and accent strip from presence directly
       # on-device, so it works even with HA offline.
       on_press:
@@ -98,6 +131,74 @@ sensor:
       name: "Moving Distance"
     still_distance:
       name: "Still Distance"
+    # Only populated while Engineering Mode is on. These are the numbers you
+    # tune against: park in front of the sensor with the leaves moving and
+    # nobody present, note the peak energy per gate, then set that gate's
+    # threshold above it. g0/g1 cover roughly the first 1.5 m at the default
+    # 0.75 m resolution, so 40 cm foliage shows up there.
+    g0:
+      move_energy:
+        name: "G0 Move Energy"
+        filters:
+          - throttle: 1s
+      still_energy:
+        name: "G0 Still Energy"
+        filters:
+          - throttle: 1s
+    g1:
+      move_energy:
+        name: "G1 Move Energy"
+        filters:
+          - throttle: 1s
+      still_energy:
+        name: "G1 Still Energy"
+        filters:
+          - throttle: 1s
+    g2:
+      move_energy:
+        name: "G2 Move Energy"
+        filters:
+          - throttle: 1s
+      still_energy:
+        name: "G2 Still Energy"
+        filters:
+          - throttle: 1s
+    g3:
+      move_energy:
+        name: "G3 Move Energy"
+        filters:
+          - throttle: 1s
+      still_energy:
+        name: "G3 Still Energy"
+        filters:
+          - throttle: 1s
+    g4:
+      move_energy:
+        name: "G4 Move Energy"
+        filters:
+          - throttle: 1s
+      still_energy:
+        name: "G4 Still Energy"
+        filters:
+          - throttle: 1s
+
+# Factory Reset restores the radar's own factory thresholds and gate settings,
+# which is the reliable way out of a botched calibration — the module knows its
+# defaults, so there is nothing to retype. The component sends the reset, then
+# restarts the module and re-reads every parameter, so the HA sliders refresh
+# to the restored values on their own (ld2410.cpp:674).
+#
+# Query Params re-reads the module's current settings without changing them —
+# useful when you want to confirm what is actually stored in radar flash rather
+# than what HA last showed.
+button:
+  - platform: ld2410
+    factory_reset:
+      name: "Factory Reset"
+    restart:
+      name: "Radar Restart"
+    query_params:
+      name: "Query Params"
 
 # Radar firmware version — distance_resolution below needs LD2410 firmware
 # 2.04 or newer; check this entity in HA if the select has no effect.
@@ -120,6 +221,13 @@ select:
 #   timeout: how long presence is held after the last detection.
 #   gN thresholds (0-100): energy needed for that gate to trigger; higher =
 #   less sensitive. still_threshold 0 disables still detection for the gate.
+#
+# Near-field false triggers (leaves/wind at ~40 cm) live in g0/g1. The radar
+# will not let you set max_move_distance_gate below 2, so you cannot range
+# them out — raise their thresholds instead. Starting point for outdoor-ish
+# mounting: g0/g1 move_threshold 80-100, still_threshold 0 (a swaying branch
+# reads as "still" the moment it pauses between gusts). Then walk the area
+# and drop them back down until people register reliably again.
 number:
   - platform: ld2410
     max_move_distance_gate:
