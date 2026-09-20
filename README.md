@@ -16,7 +16,7 @@ library, pulled in here as a git submodule.
 | `photo-page.yaml` | Kids-photo screensaver page (auto-shows on idle, tap to dismiss) |
 | `led-sensor.yaml` | Standalone presence-sensor node (YD-ESP32-S3 + LD2410 radar), drives an LED strip |
 | `desk-lamp.yaml` | Standalone CWWW desk lamp node (ESP32-S3 + AS7341), matches the room's light |
-| `photo-server/` | Container that serves random panel-sized JPEGs from a photo folder |
+| `photo-server/` | Container that serves panel-sized JPEGs from a photo folder, by name |
 | `esphome-modular-lvgl-buttons/` | Submodule: the UI component library (own repo/history) |
 | `docker-compose.yml` | speech-to-text + photo services, `docker compose up -d` |
 
@@ -98,12 +98,13 @@ curl http://localhost:8080/screenshot > shot.png
 ## Kids-photo screensaver
 
 `photo-page.yaml` adds a photo-frame page: after 5 minutes without touch input the panel
-fades into a slideshow of random photos (a new one every 20 s); tapping anywhere returns
-to the main page. The page is skipped by swipe navigation — it only appears on idle.
+fades into a slideshow that cycles through the photos by name (a new one every
+20 s); tapping anywhere returns to the main page. The page is skipped by swipe
+navigation — it only appears on idle.
 Timings and the server URL are substitutions at the top of `my-panel.yaml`.
 
 Photos come from the `kids-photos` service in `docker-compose.yml` — a tiny HTTP server
-(`photo-server/`) that returns a random image from a folder, EXIF-rotated and resized to
+(`photo-server/`) that returns the next image from a folder, EXIF-rotated and resized to
 fit the 1280x800 screen (HEIC/iPhone photos supported). Point its volume at your photo
 library — a local `./photos` folder, an SMB/NFS mount of the NAS share, or run the
 compose file on the NAS itself — then set `photo_server_url` in `my-panel.yaml` to that
@@ -111,6 +112,7 @@ machine's IP:
 
 ```bash
 docker compose up -d kids-photos
+docker compose up -d --build kids-photos
 curl http://localhost:8128/health   # → "N photos"
 curl -o test.jpg http://localhost:8128/photo
 ```

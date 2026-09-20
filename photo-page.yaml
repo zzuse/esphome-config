@@ -2,35 +2,45 @@
 #
 # A full-screen page that behaves like a photo-frame screensaver: after the
 # touchscreen has been idle for ${photo_idle_timeout_s} seconds it appears on
-# its own, cycles through random photos every ${photo_slideshow_interval}, and
-# a single tap anywhere returns to the main page.
+# its own and then loops — the next photo for ${photo_slideshow_interval},
+# then the weather page for ${photo_weather_interval}, then the next photo —
+# until a touch anywhere returns to the main page.
 #
 # Photos are fetched over HTTP from photo-server/ (see that directory and
-# docker-compose.yml): a tiny container that picks a random file from your
-# photo library (NAS mount or local folder), fixes the EXIF rotation, resizes
+# docker-compose.yml): a tiny container that walks your photo library (NAS
+# mount or local folder) by file name, fixes the EXIF rotation, resizes
 # it to fit the 1280x800 screen, and returns it as a JPEG. Every request to
-# the same URL returns a different photo, so the panel just re-downloads
-# ${photo_server_url} whenever it wants the next one.
+# the same URL advances to the next photo and wraps around at the end, so
+# the panel just re-downloads ${photo_server_url} whenever it wants the next
+# one (set ORDER=random on the container to go back to shuffled photos). The
+# download is kicked off as the weather page appears, so the next photo has
+# the whole weather interval to arrive and is already decoded when the page
+# flips back.
 #
 # Idle detection deliberately does NOT use `lvgl: on_idle:` — the backlight
 # package (common/backlight_time.yaml) already defines that trigger as a
 # single mapping, and a second definition here would merge over it and break
 # the night-time screen blanking. Instead an `interval:` polls LVGL's own
 # touch-inactivity clock (lv_disp_get_inactive_time), which the backlight
-# logic never touches.
+# logic never touches. That same poll is what ends the screensaver when the
+# weather page is showing — only the photo page has a tap-to-exit layer.
 #
 # These are the live settings — edit them here. (A device file could still
 # override them from its own top-level substitutions, but my-panel.yaml
 # deliberately doesn't, so there's only one place to edit.)
 substitutions:
-  # URL that returns a random JPEG on every request — point at the machine
+  # URL that returns the next JPEG in the cycle — point at the machine
   # running photo-server (docker-compose.yml).
   photo_server_url: "http://10.0.0.30:8128/photo"
   photo_idle_timeout_s: "300" # seconds of no touching before the slideshow starts
-  photo_slideshow_interval: 15s # how long each photo stays up
+  photo_slideshow_interval: 10s # how long each photo stays up
+  photo_weather_interval: 5s # how long the weather page shows between photos
 
 globals:
-  - id: photo_mode
+  # True for as long as the screensaver cycle owns the screen — note this is
+  # not "the photo page is showing", since the cycle also visits the weather
+  # page. Cleared by a touch (see the watchdog interval and the tap layer).
+  - id: screensaver_active
     type: bool
     restore_value: false
     initial_value: "false"
@@ -53,34 +63,84 @@ image:
           level: WARN
           format: "Kids photo download failed — is photo-server running?"
 
-interval:
-  # Idle watchdog: start the slideshow after ${photo_idle_timeout_s}s without
-  # touch input. Skipped while LVGL is paused (night-mode screen blank).
-  - interval: 10s
+script:
+  # The screensaver loop itself: photo, weather, repeat. `mode: restart` plus
+  # `script.stop` below means a touch cuts a delay short instead of leaving a
+  # page change queued behind it.
+  - id: photo_slideshow
+    mode: restart
     then:
-      - if:
+      - while:
           condition:
-            and:
-              - not:
-                  lvgl.is_paused:
-              - lambda: |-
-                  return !id(photo_mode) &&
-                         lv_disp_get_inactive_time(NULL) >
-                             (uint32_t) ${photo_idle_timeout_s} * 1000UL;
+            lambda: "return id(screensaver_active);"
           then:
             - lvgl.page.show:
                 id: photo_page
                 animation: FADE_IN
                 time: 500ms
-            - component.update: kids_photo
-  # Slideshow: fetch the next photo while the page is showing.
-  - interval: ${photo_slideshow_interval}
+            - delay: ${photo_slideshow_interval}
+            - if:
+                condition:
+                  lambda: "return id(screensaver_active);"
+                then:
+                  - lvgl.page.show:
+                      id: weather_page
+                      animation: FADE_IN
+                      time: 500ms
+                  # Fetch the next photo while the weather page is up, so the
+                  # flip back to the photo page shows a new image immediately.
+                  - component.update: kids_photo
+                  - delay: ${photo_weather_interval}
+
+  - id: !extend time_update
+    then:
+      - lambda: |-
+          auto now = id(system_time).now();
+          if (!now.is_valid()) return;
+          int hour12 = now.hour % 12;
+          if (hour12 == 0) hour12 = 12;
+          lv_label_set_text(id(photo_clock),
+              str_sprintf("%d:%02d %s", hour12, now.minute,
+                          now.hour < 12 ? "am" : "pm").c_str());
+
+interval:
+  # Idle watchdog. Polled every second so a touch on the weather page (which
+  # has no tap-to-exit layer of its own) still ends the screensaver promptly.
+  - interval: 1s
     then:
       - if:
           condition:
-            lambda: "return id(photo_mode);"
+            lambda: "return !id(screensaver_active);"
           then:
-            - component.update: kids_photo
+            # Not running: start after ${photo_idle_timeout_s}s without touch.
+            # Skipped while LVGL is paused (night-mode screen blank).
+            - if:
+                condition:
+                  and:
+                    - not:
+                        lvgl.is_paused:
+                    - lambda: |-
+                        return lv_disp_get_inactive_time(NULL) >
+                                   (uint32_t) ${photo_idle_timeout_s} * 1000UL;
+                then:
+                  - lambda: "id(screensaver_active) = true;"
+                  - component.update: kids_photo
+                  - script.execute: photo_slideshow
+          else:
+            # Running: stop on the first touch, or if night mode blanked the
+            # screen underneath us (no point downloading photos into the dark).
+            - if:
+                condition:
+                  or:
+                    - lvgl.is_paused:
+                    - lambda: "return lv_disp_get_inactive_time(NULL) < 1500UL;"
+                then:
+                  - script.stop: photo_slideshow
+                  - lambda: "id(screensaver_active) = false;"
+                  - lvgl.page.show:
+                      id: main_page
+                      animation: FADE_IN
+                      time: 300ms
 
 lvgl:
   pages:
@@ -90,10 +150,7 @@ lvgl:
       bg_opa: COVER
       pad_all: 0
       on_load:
-        - lambda: "id(photo_mode) = true;"
         - script.execute: time_update # clock is fresh immediately, not after up to 1 min
-      on_unload:
-        - lambda: "id(photo_mode) = false;"
       widgets:
         - image:
             id: photo_img
@@ -109,7 +166,9 @@ lvgl:
             x: -14
             y: -10
             text: ""
-        # Invisible full-screen touch layer: tap anywhere to go back.
+        # Invisible full-screen touch layer: tap anywhere to go back. The
+        # watchdog above would catch the touch a moment later anyway, but this
+        # makes the tap feel instant.
         - obj:
             width: 100%
             height: 100%
@@ -117,19 +176,9 @@ lvgl:
             border_width: 0
             radius: 0
             on_press:
+              - script.stop: photo_slideshow
+              - lambda: "id(screensaver_active) = false;"
               - lvgl.page.show:
                   id: main_page
                   animation: FADE_IN
                   time: 300ms
-
-script:
-  - id: !extend time_update
-    then:
-      - lambda: |-
-          auto now = id(system_time).now();
-          if (!now.is_valid()) return;
-          int hour12 = now.hour % 12;
-          if (hour12 == 0) hour12 = 12;
-          lv_label_set_text(id(photo_clock),
-              str_sprintf("%d:%02d %s", hour12, now.minute,
-                          now.hour < 12 ? "am" : "pm").c_str());

@@ -18,8 +18,9 @@ services:
       - ./piper-data:/data
     restart: unless-stopped
 
-  # Random-photo server for the panel's kids-photo screensaver (photo-page.yaml).
-  # GET :8128/photo returns a random, panel-sized JPEG from the mounted folder.
+  # Photo server for the panel's kids-photo screensaver (photo-page.yaml).
+  # GET :8128/photo returns the next panel-sized JPEG from the mounted folder,
+  # cycling through it in ascending file-name order.
   kids-photos:
     build: ./photo-server
     ports:
@@ -33,4 +34,5 @@ services:
       HEIGHT: "800"
       QUALITY: "85"
       RESCAN_SECONDS: "600" # how often to re-scan the folder for new photos
+      ORDER: "sequential" # cycle by file name; "random" to shuffle instead
     restart: unless-stopped
