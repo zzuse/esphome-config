@@ -150,29 +150,34 @@ ls grafana-export/
 Then add it to `/etc/fstab` so it survives reboots (one line):
 
 ```
-//10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.mount-timeout=30,x-systemd.before=docker.service  0  0
-//10.0.0.133/photo/grafana-export  /home/zzuse/code/esphome-config/grafana-export  cifs  credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.mount-timeout=30,x-systemd.before=docker.service  0  0
+//10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30  0  0
+//10.0.0.133/photo/grafana-export  /home/zzuse/code/esphome-config/grafana-export  cifs  credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30  0  0
 ```
 
-`sudo systemctl daemon-reload && sudo mount -a` applies it; `findmnt` on each path should
-then show `cifs`. `ro` on the photos share is deliberate: the panel never needs to write,
-so a read-only mount keeps the originals safe. `grafana-export` is `rw` because the
-SafeFamily `display-export` container writes the PNG into the same folder.
+`sudo systemctl daemon-reload && sudo systemctl restart remote-fs.target` applies it. After
+the first access (`ls photos/`), `findmnt` on each path shows an `autofs` line with a
+`cifs` line on top. `ro` on the photos share is deliberate: the panel never needs to
+write, so a read-only mount keeps the originals safe. `grafana-export` is `rw` because
+the SafeFamily `display-export` container writes the PNG into the same folder.
 
 How the options keep the containers and the mounts in step:
 
-- **No `x-systemd.automount`.** An automounted share is only an `autofs` placeholder
-  until something opens it, and that placeholder is what a container binds at start.
-  Opening it later mounts the share on the host only, so inside the container it
-  stays missing (or fails with "Too many levels of symbolic links").
-- **`x-systemd.before=docker.service`** makes Docker, and so every container, wait for
-  the mount at boot. Without it, `nofail` also drops the mount's ordering before
-  `remote-fs.target`, so nothing makes Docker wait.
-- **`_netdev,nofail,x-systemd.mount-timeout=30`**: if the NAS is down, boot and Docker
-  wait at most 30 s, then carry on without the share instead of hanging.
-- **`rslave` in `docker-compose.yml`** covers a share that comes up after the container
-  started, e.g. a NAS that was off at boot or a manual `sudo mount`. The new mount
-  propagates into the running container, so there's no need to recreate it.
+- **`x-systemd.automount`** mounts the share on first access. At boot that access is
+  Docker binding the folder for the container, so the container gets the real share.
+  If the NAS is down at that moment, the next access tries again; a plain boot-time
+  mount would fail once and never retry.
+- **`_netdev,nofail,x-systemd.mount-timeout=30`**: when the NAS is down, an access waits
+  at most 30 s and fails, instead of hanging boot or the container.
+- **`rslave` in `docker-compose.yml`** lets a share that is mounted after the container
+  started (a retried automount, or a manual `sudo mount`) show up inside it, so the
+  container doesn't need recreating.
+- **NAS reboots need nothing.** The share stays mounted while the NAS is down, and the
+  kernel CIFS client reconnects when it's back (`dmesg` shows "has not responded ...
+  Reconnecting"). Reads fail in between: `/photo` returns 503 and the panel keeps the
+  photo it has, and `/grafana` keeps serving the last image, with the STALE banner once
+  it's older than `GRAFANA_MAX_AGE`.
+- **Don't add `x-systemd.idle-timeout=`.** It unmounts an idle share, which a running
+  container without `rslave` would never see come back.
 
 Notes on things that bite:
 
