@@ -141,12 +141,17 @@ mkdir -p photos
 sudo mount -t cifs //10.0.0.133/photo /home/zzuse/code/esphome-config/photos \
   -o credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8
 ls photos/
+mkdir -p grafana-export
+sudo mount -t cifs //10.0.0.133/photo/grafana-export /home/zzuse/code/esphome-config/grafana-export \
+  -o credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8
+ls grafana-export/
 ```
 
 Then add it to `/etc/fstab` so it survives reboots (one line):
 
 ```
 //10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount  0  0
+//10.0.0.133/photo/grafana-export  /home/zzuse/code/esphome-config/grafana-export  cifs  credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail  0  0
 ```
 
 `sudo systemctl daemon-reload && sudo mount -a` applies it. `ro` is deliberate: the panel
