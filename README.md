@@ -14,6 +14,7 @@ library, pulled in here as a git submodule.
 | `secrets.yaml` | Local secrets (wifi, coordinates) — gitignored, not in the repo |
 | `secrets.yaml.example` | Template for `secrets.yaml` |
 | `photo-page.yaml` | Kids-photo screensaver page (auto-shows on idle, tap to dismiss) |
+| `grafana-page.yaml` | Swipe page showing an exported Grafana status image |
 | `led-sensor.yaml` | Standalone presence-sensor node (YD-ESP32-S3 + LD2410 radar), drives an LED strip |
 | `desk-lamp.yaml` | Standalone CWWW desk lamp node (ESP32-S3 + AS7341), matches the room's light |
 | `photo-server/` | Container that serves panel-sized JPEGs from a photo folder, by name |
@@ -140,18 +141,43 @@ mkdir -p photos
 sudo mount -t cifs //10.0.0.133/photo /home/zzuse/code/esphome-config/photos \
   -o credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8
 ls photos/
+mkdir -p grafana-export
+sudo mount -t cifs //10.0.0.133/photo/grafana-export /home/zzuse/code/esphome-config/grafana-export \
+  -o credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8
+ls grafana-export/
 ```
 
 Then add it to `/etc/fstab` so it survives reboots (one line):
 
 ```
-//10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount  0  0
+//10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30  0  0
+//10.0.0.133/photo/grafana-export  /home/zzuse/code/esphome-config/grafana-export  cifs  credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=30  0  0
 ```
 
-`sudo systemctl daemon-reload && sudo mount -a` applies it. `ro` is deliberate: the panel
-never needs to write, so a read-only mount keeps the originals safe. `_netdev,nofail`
-stops boot from hanging when the NAS is asleep, and `x-systemd.automount` mounts the share
-lazily on first access instead of at boot.
+`sudo systemctl daemon-reload && sudo systemctl restart remote-fs.target` applies it. After
+the first access (`ls photos/`), `findmnt` on each path shows an `autofs` line with a
+`cifs` line on top. `ro` on the photos share is deliberate: the panel never needs to
+write, so a read-only mount keeps the originals safe. `grafana-export` is `rw` because
+the SafeFamily `display-export` container writes the PNG into the same folder.
+
+How the options keep the containers and the mounts in step:
+
+- **`x-systemd.automount`** mounts the share on first access. At boot that access is
+  Docker binding the folder for the container, so the container gets the real share.
+  If the NAS is down at that moment, the next access tries again; a plain boot-time
+  mount would fail once and never retry.
+- **`_netdev,nofail,x-systemd.mount-timeout=30`**: when the NAS is down, an access waits
+  at most 30 s and fails, instead of hanging boot or the container.
+- **`rslave` in `docker-compose.yml`** lets a share that is mounted after the container
+  started (a retried automount, or a manual `sudo mount`) show up inside it, so the
+  container doesn't need recreating.
+- **NAS reboots need nothing.** The share stays mounted while the NAS is down, and the
+  kernel CIFS client reconnects when it's back (`dmesg` shows "has not responded ...
+  Reconnecting"). Reads fail in between: `/photo` returns 503 and the panel keeps the
+  photo it has, and `/grafana` keeps serving the last image, with the STALE banner once
+  it's older than `GRAFANA_MAX_AGE`.
+- **Don't add `x-systemd.idle-timeout=`.** It unmounts an idle share, which a running
+  container without `rslave` would never see come back.
 
 Notes on things that bite:
 
@@ -161,9 +187,9 @@ Notes on things that bite:
   their own, and never try SMB1 unless asked. Add `vers=3.0` only if negotiation fails.
 - **Use the IP, not the NAS hostname.** With SMB1 disabled, NetBIOS name resolution is off,
   so `//DISKSTATION/photo` won't resolve unless DNS or mDNS publishes the name.
-- **Mount before starting the container.** Docker binds `./photos` with private mount
-  propagation, so a share mounted *after* the container started stays invisible inside it —
-  the server reports 0 photos while `ls photos/` shows files. Fix with
+- **Share mounted but the server sees nothing** (0 photos, or `/grafana` returns 503
+  while `ls grafana-export/` shows the PNG): the container was started without `rslave`
+  before the share was mounted, so it still has the empty folder underneath. Fix with
   `docker compose up -d --force-recreate kids-photos`.
 - **New files take up to `RESCAN_SECONDS`** (10 min by default) to appear in the rotation.
 
@@ -176,6 +202,27 @@ For NFS the equivalent is `showmount -e 10.0.0.133` to list exports, then:
 ```
 10.0.0.133:/volume1/photo  /home/zzuse/code/esphome-config/photos  nfs  ro,_netdev,nofail,x-systemd.automount  0  0
 ```
+
+## Grafana status page
+
+`grafana-page.yaml` adds a swipe page that shows a Grafana image. It reloads the image
+when the page opens and every minute while it stays open.
+
+The panel doesn't render anything itself. An external job exports the image (PNG or JPEG)
+into `./grafana-export/` on the machine running `kids-photos`, and `GET :8128/grafana`
+serves the newest file there, fitted to 1280x800. Export at 1280x800 so the text isn't
+scaled, and write to a temporary name outside the folder (or a dot-file) and then rename
+it, so a half-written file is never picked up:
+
+```bash
+mkdir -p grafana-export
+cp status.png grafana-export/.status.tmp && mv grafana-export/.status.tmp grafana-export/status.png
+curl -o test.jpg http://localhost:8128/grafana
+```
+
+An export older than `GRAFANA_MAX_AGE` seconds (default 600, in `docker-compose.yml`) gets
+a red STALE banner, so a stopped export job can't leave an old status looking current.
+If the panel can't fetch an image at all, it shows a notice on the page instead.
 
 ## LED presence sensor
 

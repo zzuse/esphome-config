@@ -1,0 +1,76 @@
+# Grafana status page.
+#
+# A normal swipe page showing a Grafana image as a picture. The panel can't
+# render Grafana, so an external job exports the image into ./grafana-export
+# and photo-server serves the newest one at /grafana (see README.md). A stopped
+# export job shows up as a STALE banner drawn into the image by the server.
+#
+# The image is only re-downloaded while this page is on screen, on the same
+# reload-on-demand pattern as photo-page.yaml. http_request comes from the
+# hardware include, so it isn't declared here.
+substitutions:
+  grafana_image_url: "http://10.0.0.30:8128/grafana"
+  grafana_refresh_interval: 60s
+
+globals:
+  - id: grafana_page_showing
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+# ~2MB of PSRAM for the 1280x800 RGB565 frame, like kids_photo.
+image:
+  - platform: online_image
+    id: grafana_status
+    url: ${grafana_image_url}
+    format: JPEG
+    type: RGB565
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: grafana_img
+          src: grafana_status
+      - lvgl.widget.hide: grafana_notice
+    on_error:
+      - lvgl.widget.show: grafana_notice
+      - logger.log:
+          level: WARN
+          format: "Grafana image download failed — is photo-server running, and has an image been exported?"
+
+interval:
+  - interval: ${grafana_refresh_interval}
+    then:
+      - if:
+          condition:
+            lambda: "return id(grafana_page_showing);"
+          then:
+            - component.update: grafana_status
+
+lvgl:
+  pages:
+    - id: grafana_page
+      styles: page_style
+      pad_all: 0
+      <<: !include esphome-modular-lvgl-buttons/common/swipe_navigation.yaml
+      on_load:
+        - lambda: "id(grafana_page_showing) = true;"
+        - component.update: grafana_status
+      on_unload:
+        - lambda: "id(grafana_page_showing) = false;"
+      widgets:
+        - image:
+            id: grafana_img
+            src: grafana_status
+            align: center
+        # Drawn over the image: the last good frame stays up if a refresh fails.
+        - label:
+            id: grafana_notice
+            hidden: true
+            text_font: $text_font
+            text_color: white
+            bg_color: 0xBE1414
+            bg_opa: COVER
+            pad_all: 10
+            align: bottom_mid
+            y: -14
+            text: "Grafana image unavailable"

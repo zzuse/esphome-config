@@ -70,6 +70,9 @@ packages:
   # Kids-photo screensaver page (shows up on idle, tap to dismiss)
   photo_page: !include photo-page.yaml
 
+  # Grafana Status + AdGuard swipe page (image exported to photo-server)
+  grafana_page: !include grafana-page.yaml
+
   # Hardware description file for 10.1" display
   hardware: !include
     file: esphome-modular-lvgl-buttons/hardware/waveshare-esp32-p4-wifi6-touch-lcd-10.1.yaml
