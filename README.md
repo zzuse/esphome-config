@@ -14,6 +14,7 @@ library, pulled in here as a git submodule.
 | `secrets.yaml` | Local secrets (wifi, coordinates) — gitignored, not in the repo |
 | `secrets.yaml.example` | Template for `secrets.yaml` |
 | `photo-page.yaml` | Kids-photo screensaver page (auto-shows on idle, tap to dismiss) |
+| `grafana-page.yaml` | Swipe page showing an exported Grafana status image |
 | `led-sensor.yaml` | Standalone presence-sensor node (YD-ESP32-S3 + LD2410 radar), drives an LED strip |
 | `desk-lamp.yaml` | Standalone CWWW desk lamp node (ESP32-S3 + AS7341), matches the room's light |
 | `photo-server/` | Container that serves panel-sized JPEGs from a photo folder, by name |
@@ -176,6 +177,27 @@ For NFS the equivalent is `showmount -e 10.0.0.133` to list exports, then:
 ```
 10.0.0.133:/volume1/photo  /home/zzuse/code/esphome-config/photos  nfs  ro,_netdev,nofail,x-systemd.automount  0  0
 ```
+
+## Grafana status page
+
+`grafana-page.yaml` adds a swipe page that shows a Grafana image. It reloads the image
+when the page opens and every minute while it stays open.
+
+The panel doesn't render anything itself. An external job exports the image (PNG or JPEG)
+into `./grafana-export/` on the machine running `kids-photos`, and `GET :8128/grafana`
+serves the newest file there, fitted to 1280x800. Export at 1280x800 so the text isn't
+scaled, and write to a temporary name outside the folder (or a dot-file) and then rename
+it, so a half-written file is never picked up:
+
+```bash
+mkdir -p grafana-export
+cp status.png grafana-export/.status.tmp && mv grafana-export/.status.tmp grafana-export/status.png
+curl -o test.jpg http://localhost:8128/grafana
+```
+
+An export older than `GRAFANA_MAX_AGE` seconds (default 600, in `docker-compose.yml`) gets
+a red STALE banner, so a stopped export job can't leave an old status looking current.
+If the panel can't fetch an image at all, it shows a notice on the page instead.
 
 ## LED presence sensor
 
