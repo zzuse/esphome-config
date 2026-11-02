@@ -28,10 +28,12 @@ services:
     volumes:
       # Point this at your photo library: a local folder, or an SMB/NFS mount
       # of the NAS share (or run this compose file on the NAS itself).
-      - ./photos:/photos:ro
+      # rslave: a share mounted on the host after this container started still
+      # shows up inside it (see README "Mounting a NAS share").
+      - ./photos:/photos:ro,rslave
       # Grafana status image for grafana-page.yaml, written by an external
       # export job. GET :8128/grafana serves the newest image in here.
-      - ./grafana-export:/grafana-export:ro
+      - ./grafana-export:/grafana-export:ro,rslave
     environment:
       WIDTH: "1280" # panel resolution (landscape)
       HEIGHT: "800"

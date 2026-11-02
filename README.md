@@ -150,14 +150,29 @@ ls grafana-export/
 Then add it to `/etc/fstab` so it survives reboots (one line):
 
 ```
-//10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.automount  0  0
-//10.0.0.133/photo/grafana-export  /home/zzuse/code/esphome-config/grafana-export  cifs  credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail  0  0
+//10.0.0.133/photo  /home/zzuse/code/esphome-config/photos  cifs  credentials=/etc/cifs-photos.cred,ro,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.mount-timeout=30,x-systemd.before=docker.service  0  0
+//10.0.0.133/photo/grafana-export  /home/zzuse/code/esphome-config/grafana-export  cifs  credentials=/etc/cifs-photos.cred,rw,uid=1000,gid=1000,iocharset=utf8,_netdev,nofail,x-systemd.mount-timeout=30,x-systemd.before=docker.service  0  0
 ```
 
-`sudo systemctl daemon-reload && sudo mount -a` applies it. `ro` is deliberate: the panel
-never needs to write, so a read-only mount keeps the originals safe. `_netdev,nofail`
-stops boot from hanging when the NAS is asleep, and `x-systemd.automount` mounts the share
-lazily on first access instead of at boot.
+`sudo systemctl daemon-reload && sudo mount -a` applies it; `findmnt` on each path should
+then show `cifs`. `ro` on the photos share is deliberate: the panel never needs to write,
+so a read-only mount keeps the originals safe. `grafana-export` is `rw` because the
+SafeFamily `display-export` container writes the PNG into the same folder.
+
+How the options keep the containers and the mounts in step:
+
+- **No `x-systemd.automount`.** An automounted share is only an `autofs` placeholder
+  until something opens it, and that placeholder is what a container binds at start.
+  Opening it later mounts the share on the host only, so inside the container it
+  stays missing (or fails with "Too many levels of symbolic links").
+- **`x-systemd.before=docker.service`** makes Docker, and so every container, wait for
+  the mount at boot. Without it, `nofail` also drops the mount's ordering before
+  `remote-fs.target`, so nothing makes Docker wait.
+- **`_netdev,nofail,x-systemd.mount-timeout=30`**: if the NAS is down, boot and Docker
+  wait at most 30 s, then carry on without the share instead of hanging.
+- **`rslave` in `docker-compose.yml`** covers a share that comes up after the container
+  started, e.g. a NAS that was off at boot or a manual `sudo mount`. The new mount
+  propagates into the running container, so there's no need to recreate it.
 
 Notes on things that bite:
 
@@ -167,9 +182,9 @@ Notes on things that bite:
   their own, and never try SMB1 unless asked. Add `vers=3.0` only if negotiation fails.
 - **Use the IP, not the NAS hostname.** With SMB1 disabled, NetBIOS name resolution is off,
   so `//DISKSTATION/photo` won't resolve unless DNS or mDNS publishes the name.
-- **Mount before starting the container.** Docker binds `./photos` with private mount
-  propagation, so a share mounted *after* the container started stays invisible inside it —
-  the server reports 0 photos while `ls photos/` shows files. Fix with
+- **Share mounted but the server sees nothing** (0 photos, or `/grafana` returns 503
+  while `ls grafana-export/` shows the PNG): the container was started without `rslave`
+  before the share was mounted, so it still has the empty folder underneath. Fix with
   `docker compose up -d --force-recreate kids-photos`.
 - **New files take up to `RESCAN_SECONDS`** (10 min by default) to appear in the rotation.
 
