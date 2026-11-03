@@ -15,6 +15,8 @@ library, pulled in here as a git submodule.
 | `secrets.yaml.example` | Template for `secrets.yaml` |
 | `photo-page.yaml` | Kids-photo screensaver page (auto-shows on idle, tap to dismiss) |
 | `grafana-page.yaml` | Swipe page showing an exported Grafana status image |
+| `flash-alert.yaml` | Flash-alert module: list of active alerts + blinking full-screen alert page |
+| `flash-alert-rule.yaml` | Template for a threshold alert rule on a numeric sensor (one include per rule) |
 | `led-sensor.yaml` | Standalone presence-sensor node (YD-ESP32-S3 + LD2410 radar), drives an LED strip |
 | `desk-lamp.yaml` | Standalone CWWW desk lamp node (ESP32-S3 + AS7341), matches the room's light |
 | `photo-server/` | Container that serves panel-sized JPEGs from a photo folder, by name |
@@ -223,6 +225,63 @@ curl -o test.jpg http://localhost:8128/grafana
 An export older than `GRAFANA_MAX_AGE` seconds (default 600, in `docker-compose.yml`) gets
 a red STALE banner, so a stopped export job can't leave an old status looking current.
 If the panel can't fetch an image at all, it shows a notice on the page instead.
+
+## Flash alerts
+
+While any alert rule is firing, the photo slideshow shows a blinking red full-screen page
+for a few seconds after each photo, with one line of text per firing alert. With nothing
+firing, the slideshow is unchanged. Alerts only appear while the slideshow is running.
+
+`flash-alert.yaml` is the core module. It keeps the list of active alerts and owns the
+alert page. Each alert has a stable `rule` id and a message, and three scripts drive it:
+
+| Script | What it does |
+|---|---|
+| `flash_alert_raise(rule, message)` | Add an alert, or replace its message (e.g. with a fresh reading) |
+| `flash_alert_clear(rule)` | Remove an alert (no-op if it isn't active) |
+| `flash_alert_flash` | Show the alert page for `flash_alert_duration` (4 s) if anything is active |
+
+### Adding a threshold rule
+
+A rule on a numeric sensor needs no code, just one include of `flash-alert-rule.yaml` in
+the `packages:` of `my-panel.yaml`. The CO2 rule that ships there raises above 3000 ppm
+and clears below 2800. For example, a humidity alert:
+
+```yaml
+flash_alert_humidity: !include
+  file: flash-alert-rule.yaml
+  vars:
+    rule: humidity_high      # unique id for this rule
+    sensor_id: air_hum       # an existing `sensor:` id
+    raise_if: "x > 70"       # C++ expression on the new reading `x`
+    clear_if: "x < 65"       # keep a gap below raise_if so it doesn't flicker
+    message: "Humidity %.0f%% - too damp"
+```
+
+- `message` is a printf format string that gets the reading `x` as its one argument, so a
+  literal `%` has to be written as `%%`.
+- Keep messages plain ASCII. The theme fonts have no glyphs for characters like `—` or `₂`,
+  so those show up blank.
+- Readings that come through as NaN (sensor unavailable in HA) are ignored, so the alert
+  keeps its last state.
+
+### Raising alerts from Home Assistant
+
+The raise and clear scripts are also exposed as HA actions, so an HA automation can
+drive an alert without a firmware change:
+
+```yaml
+action: esphome.waveshare_p4_lcd_10_1_flash_alert_raise
+data:
+  rule: test
+  message: "Test alert"
+```
+
+Clear it with `esphome.waveshare_p4_lcd_10_1_flash_alert_clear` and `rule: test`. A
+restart clears all alerts.
+
+To check the page layout without hardware, run `esphome run sim-flash-shot.yaml`, then
+`curl http://localhost:8080/screenshot > shot.png`.
 
 ## LED presence sensor
 
