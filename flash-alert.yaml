@@ -1,0 +1,201 @@
+# Flash-alert module.
+#
+# A small registry of "currently firing" alerts plus a full-screen, blinking
+# alert page that lists them. Anything can raise or clear an alert; anything
+# that owns the screen (today: the photo slideshow in photo-page.yaml) decides
+# when to show the flash page by calling `flash_alert_flash`.
+#
+# Public API
+# ----------
+#   script flash_alert_raise(rule, message) add or update an alert. `rule` is a
+#                                           stable id ("co2_high"); raising the
+#                                           same rule again just replaces the
+#                                           message (e.g. with a fresh reading).
+#   script flash_alert_clear(rule)          remove an alert (no-op if absent).
+#   script flash_alert_flash                if any alert is active, show the
+#                                           flash page for ${flash_alert_duration}
+#                                           and finish; otherwise finish at once.
+#                                           It does NOT navigate away afterwards —
+#                                           the caller shows whatever comes next.
+#                                           Use `script.execute` + `script.wait`.
+#   global  flash_alerts                    std::map<rule, message> of what's firing.
+#
+# The same raise/clear calls are exposed to Home Assistant as API actions
+# (esphome.<node>_flash_alert_raise / _flash_alert_clear), so an HA automation
+# can drive an alert without touching this firmware.
+#
+# Threshold rules on a numeric sensor don't need any code: include
+# flash-alert-rule.yaml once per rule (see my-panel.yaml for the CO2 one).
+#
+# Fonts: the title/message use the theme's Nunito fonts (GF_Latin_Kernel), so
+# keep messages to plain ASCII — characters outside that set render as blanks.
+substitutions:
+  flash_alert_duration: 4s        # how long the flash page stays up per showing
+  flash_alert_blink_period: 500ms # half-period of the background blink
+  flash_alert_color_on: "0xC00000"
+  flash_alert_color_off: "0x300000"
+
+globals:
+  - id: flash_alerts
+    type: std::map<std::string, std::string>
+    restore_value: false
+  # True while flash_alert_page is the active page — gates the blink interval.
+  - id: flash_alert_showing
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: flash_alert_blink_on
+    type: bool
+    restore_value: false
+    initial_value: "true"
+
+font:
+  # One big glyph only; MDI is the same webfont ui-shared.yaml uses.
+  - file: 'https://github.com/Templarian/MaterialDesign-Webfont/raw/v7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: flash_alert_icon_font
+    size: 160
+    bpp: 4
+    glyphs: [$mdi_alert]
+
+script:
+  - id: flash_alert_raise
+    mode: queued
+    parameters:
+      rule: string
+      message: string
+    then:
+      - lambda: |-
+          auto &alerts = id(flash_alerts);
+          auto it = alerts.find(rule);
+          if (it == alerts.end()) {
+            ESP_LOGW("flash_alert", "Raised [%s]: %s", rule.c_str(), message.c_str());
+          } else if (it->second == message) {
+            return;  // nothing changed, skip the relabel
+          }
+          alerts[rule] = message;
+      - script.execute: flash_alert_render
+
+  - id: flash_alert_clear
+    mode: queued
+    parameters:
+      rule: string
+    then:
+      - lambda: |-
+          if (id(flash_alerts).erase(rule) > 0) {
+            ESP_LOGI("flash_alert", "Cleared [%s]", rule.c_str());
+          }
+      - script.execute: flash_alert_render
+
+  # Rebuild the page's labels from the registry. Cheap; called on every change.
+  - id: flash_alert_render
+    mode: queued
+    then:
+      - lambda: |-
+          auto &alerts = id(flash_alerts);
+          std::string body;
+          for (auto &kv : alerts) {
+            if (!body.empty()) body += "\n";
+            body += kv.second;
+          }
+          lv_label_set_text(id(flash_alert_text), body.c_str());
+          lv_label_set_text(id(flash_alert_title),
+              alerts.size() > 1 ? str_sprintf("%u ALERTS", (unsigned) alerts.size()).c_str()
+                                : "ALERT");
+
+  - id: flash_alert_flash
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: "return !id(flash_alerts).empty();"
+          then:
+            - lvgl.page.show:
+                id: flash_alert_page
+                animation: NONE
+            - delay: ${flash_alert_duration}
+
+interval:
+  - interval: ${flash_alert_blink_period}
+    then:
+      - if:
+          condition:
+            lambda: "return id(flash_alert_showing);"
+          then:
+            - lambda: |-
+                id(flash_alert_blink_on) = !id(flash_alert_blink_on);
+                lv_obj_set_style_bg_color(id(flash_alert_panel),
+                    lv_color_hex(id(flash_alert_blink_on) ? ${flash_alert_color_on}
+                                                          : ${flash_alert_color_off}),
+                    LV_PART_MAIN);
+
+api:
+  actions:
+    - action: flash_alert_raise
+      variables:
+        rule: string
+        message: string
+      then:
+        - script.execute:
+            id: flash_alert_raise
+            rule: !lambda "return rule;"
+            message: !lambda "return message;"
+    - action: flash_alert_clear
+      variables:
+        rule: string
+      then:
+        - script.execute:
+            id: flash_alert_clear
+            rule: !lambda "return rule;"
+
+lvgl:
+  pages:
+    - id: flash_alert_page
+      skip: true # never part of the swipe rotation
+      bg_color: 0x000000
+      bg_opa: COVER
+      pad_all: 0
+      on_load:
+        # Always start on the bright phase so the first frame is the alert colour.
+        - lambda: |-
+            id(flash_alert_blink_on) = true;
+            id(flash_alert_showing) = true;
+            lv_obj_set_style_bg_color(id(flash_alert_panel),
+                lv_color_hex(${flash_alert_color_on}), LV_PART_MAIN);
+      on_unload:
+        - lambda: "id(flash_alert_showing) = false;"
+      widgets:
+        - obj:
+            id: flash_alert_panel
+            width: 100%
+            height: 100%
+            radius: 0
+            border_width: 0
+            pad_all: 24
+            bg_color: ${flash_alert_color_on}
+            bg_opa: COVER
+            scrollbar_mode: "OFF"
+            layout:
+              type: flex
+              flex_flow: COLUMN
+              flex_align_main: CENTER
+              flex_align_cross: CENTER
+              flex_align_track: CENTER
+              pad_row: 8
+            widgets:
+              - label:
+                  text_font: flash_alert_icon_font
+                  text_color: white
+                  text: $mdi_alert
+              - label:
+                  id: flash_alert_title
+                  text_font: nunito_72
+                  text_color: white
+                  text: "ALERT"
+              - label:
+                  id: flash_alert_text
+                  text_font: nunito_48
+                  text_color: white
+                  text_align: CENTER
+                  long_mode: WRAP
+                  width: 90%
+                  text: ""

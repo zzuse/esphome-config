@@ -67,6 +67,18 @@ packages:
   # Include if your touch screen has a backlight. Also sets the time from HA
   backlight: !include esphome-modular-lvgl-buttons/common/backlight_time.yaml
 
+  # Flash-alert registry + blinking alert page; the photo slideshow flashes it
+  # between photos while any rule is firing. Add rules below, one per include.
+  flash_alert: !include flash-alert.yaml
+  flash_alert_co2: !include
+    file: flash-alert-rule.yaml
+    vars:
+      rule: co2_high
+      sensor_id: air_co2 # weather-page.yaml
+      raise_if: "x > 3000"
+      clear_if: "x < 2800"
+      message: "CO2 is %.0f ppm (limit 3000) - open a window!"
+
   # Kids-photo screensaver page (shows up on idle, tap to dismiss)
   photo_page: !include photo-page.yaml
 

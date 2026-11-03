@@ -1,0 +1,37 @@
+# One flash-alert rule on a numeric sensor. Include once per rule; needs
+# flash-alert.yaml to be included as well.
+#
+#   flash_alert_co2: !include
+#     file: flash-alert-rule.yaml
+#     vars:
+#       rule: co2_high             # unique rule id
+#       sensor_id: air_co2         # an existing `sensor:` id (it gets !extend-ed)
+#       raise_if: "x > 3000"       # C++ expression on the new value `x`
+#       clear_if: "x < 2800"       # keep a gap below raise_if so a value that
+#                                  # hovers at the limit doesn't flap
+#       message: "CO2 %.0f ppm"    # printf format, gets `x` as its one argument
+#
+# Between raise_if and clear_if the alert keeps its current state. While it's
+# raised, every new reading refreshes the message, so the flash page always
+# shows the latest value. NaN readings (sensor unavailable in HA) are ignored
+# and leave the alert as it was.
+sensor:
+  - id: !extend ${sensor_id}
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: "return !isnan(x) && (${raise_if});"
+            then:
+              - script.execute:
+                  id: flash_alert_raise
+                  rule: "${rule}"
+                  message: !lambda 'return str_sprintf("${message}", x);'
+            else:
+              - if:
+                  condition:
+                    lambda: "return !isnan(x) && (${clear_if});"
+                  then:
+                    - script.execute:
+                        id: flash_alert_clear
+                        rule: "${rule}"
