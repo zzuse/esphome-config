@@ -46,6 +46,19 @@ esphome:
             id: display_backlight_timeout
             value: 720
 
+# Boot-time internal-RAM headroom. On this P4 (chip rev v1.3, i.e. < v3) only
+# ~106KB of internal RAM is heap before the FreeRTOS scheduler starts (the
+# rest is added after). The ESP-Hosted WiFi driver initialises from a C
+# constructor in that window, and by default puts its transport buffer pool
+# there too, so almost nothing was left: growing static data by ~1KB made
+# FreeRTOS fail to allocate its timer task stack ("assert failed:
+# vApplicationGetTimerTaskMemory port_common.c:97") and OTA rolled back.
+# Let those buffers live in DMA-capable PSRAM (falls back to internal RAM).
+esp32:
+  framework:
+    sdkconfig_options:
+      CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
+
 logger:
   level: debug
   logs:
@@ -66,6 +79,18 @@ packages:
   sensors: !include esphome-modular-lvgl-buttons/common/sensors_base.yaml
   # Include if your touch screen has a backlight. Also sets the time from HA
   backlight: !include esphome-modular-lvgl-buttons/common/backlight_time.yaml
+
+  # Flash-alert registry + blinking alert page; the photo slideshow flashes it
+  # between photos while any rule is firing. Add rules below, one per include.
+  flash_alert: !include flash-alert.yaml
+  flash_alert_co2: !include
+    file: flash-alert-rule.yaml
+    vars:
+      rule: co2_high
+      sensor_id: air_co2 # weather-page.yaml
+      raise_if: "x > 3000"
+      clear_if: "x < 2800"
+      message: "CO2 is %.0f ppm (limit 3000) - open a window!"
 
   # Kids-photo screensaver page (shows up on idle, tap to dismiss)
   photo_page: !include photo-page.yaml

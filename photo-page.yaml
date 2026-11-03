@@ -17,6 +17,11 @@
 # the whole weather interval to arrive and is already decoded when the page
 # flips back.
 #
+# Between each photo and the weather page the loop calls flash_alert_flash
+# (flash-alert.yaml, which must be included too): while any alert rule is
+# firing, a blinking full-screen alert page listing them shows for a few
+# seconds; with nothing firing it's skipped.
+#
 # Idle detection deliberately does NOT use `lvgl: on_idle:` — the backlight
 # package (common/backlight_time.yaml) already defines that trigger as a
 # single mapping, and a second definition here would merge over it and break
@@ -83,13 +88,21 @@ script:
                 condition:
                   lambda: "return id(screensaver_active);"
                 then:
+                  # Fetch the next photo now, so it has the flash + weather
+                  # time to arrive and the flip back shows it immediately.
+                  - component.update: kids_photo
+                  # Interstitial alert flash (flash-alert.yaml). Returns at
+                  # once when nothing is firing, so no alerts = no change.
+                  - script.execute: flash_alert_flash
+                  - script.wait: flash_alert_flash
+            - if:
+                condition:
+                  lambda: "return id(screensaver_active);"
+                then:
                   - lvgl.page.show:
                       id: weather_page
                       animation: FADE_IN
                       time: 500ms
-                  # Fetch the next photo while the weather page is up, so the
-                  # flip back to the photo page shows a new image immediately.
-                  - component.update: kids_photo
                   - delay: ${photo_weather_interval}
 
   - id: !extend time_update

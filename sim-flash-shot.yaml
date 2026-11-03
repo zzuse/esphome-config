@@ -1,0 +1,53 @@
+---
+# Throwaway SDL harness: renders ONLY the flash-alert page (flash-alert.yaml)
+# at the real panel size (1280x800) with two fake alerts raised, and exposes
+# the screenshot endpoint, so layout changes can be checked without hardware.
+#
+#   esphome run sim-flash-shot.yaml
+#   curl http://localhost:8080/screenshot > shot.png
+
+external_components:
+  - source:
+      type: local
+      path: esphome-modular-lvgl-buttons/components
+    components: [lvgl_screenshot]
+
+lvgl_screenshot:
+  port: 8080
+
+substitutions:
+  icon_font: mdi_icons_40
+  text_font: nunito_20
+  screen_height: '800'
+  screen_width: '1280'
+  # Keep the page up so the screenshot isn't racing the delay.
+  flash_alert_duration: 1h
+
+esphome:
+  name: sdl-flash-shot
+  friendly_name: SDL Flash Shot
+  on_boot:
+    - priority: -100
+      then:
+        - script.execute:
+            id: flash_alert_raise
+            rule: co2_high
+            message: "CO2 is 3412 ppm (limit 3000) - open a window!"
+        - script.execute:
+            id: flash_alert_raise
+            rule: test
+            message: "Second test alert"
+        - script.execute: flash_alert_flash
+
+logger:
+  level: info
+
+packages:
+  theme: !include esphome-modular-lvgl-buttons/common/theme/index.yaml
+  hardware: !include esphome-modular-lvgl-buttons/hardware/SDL-lvgl.yaml
+  flash_alert: !include flash-alert.yaml
+
+lvgl:
+  pages:
+    - id: main_page
+      styles: page_style
