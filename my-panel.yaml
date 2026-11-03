@@ -46,6 +46,19 @@ esphome:
             id: display_backlight_timeout
             value: 720
 
+# Boot-time internal-RAM headroom. On this P4 (chip rev v1.3, i.e. < v3) only
+# ~106KB of internal RAM is heap before the FreeRTOS scheduler starts (the
+# rest is added after). The ESP-Hosted WiFi driver initialises from a C
+# constructor in that window, and by default puts its transport buffer pool
+# there too, so almost nothing was left: growing static data by ~1KB made
+# FreeRTOS fail to allocate its timer task stack ("assert failed:
+# vApplicationGetTimerTaskMemory port_common.c:97") and OTA rolled back.
+# Let those buffers live in DMA-capable PSRAM (falls back to internal RAM).
+esp32:
+  framework:
+    sdkconfig_options:
+      CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
+
 logger:
   level: debug
   logs:
